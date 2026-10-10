@@ -1,0 +1,66 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "spdbf Nearby Stops",
+        "description": "Show public transport stops near a person on the map, using your own DBF (spdbf) server.",
+        "data": {
+          "server_url": "Server URL (used by Home Assistant)",
+          "public_url": "Public URL (for links to departure boards)",
+          "tracked_entity": "Person or device to follow",
+          "sources": "Sources",
+          "radius": "Search radius",
+          "max_stops": "Maximum number of stops",
+          "departures": "Departures per stop",
+          "scan_interval": "Departure refresh interval"
+        },
+        "data_description": {
+          "server_url": "Address of the DBF Docker container on your network, e.g. http://192.168.1.10:8092.",
+          "public_url": "Optional. Where you open DBF in a browser, if that differs from the server URL. Each stop links here.",
+          "sources": "DB uses DBF's built-in station list (DB InfraGO). Other entries are HAFAS services, e.g. BVG for Berlin buses, trams and U-Bahn.",
+          "departures": "Set to 0 to show stops only, without departures."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the server.",
+      "not_dbf": "The server answered, but it doesn't look like DBF.",
+      "no_sources": "Pick at least one source."
+    },
+    "abort": {
+      "already_configured": "Nearby stops are already set up for this person or device."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "spdbf Nearby Stops",
+        "data": {
+          "server_url": "Server URL (used by Home Assistant)",
+          "public_url": "Public URL (for links to departure boards)",
+          "tracked_entity": "Person or device to follow",
+          "sources": "Sources",
+          "radius": "Search radius",
+          "max_stops": "Maximum number of stops",
+          "departures": "Departures per stop",
+          "scan_interval": "Departure refresh interval"
+        },
+        "data_description": {
+          "sources": "DB uses DBF's built-in station list (DB InfraGO). Other entries are HAFAS services, e.g. BVG for Berlin buses, trams and U-Bahn.",
+          "departures": "Set to 0 to show stops only, without departures."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the server.",
+      "not_dbf": "The server answered, but it doesn't look like DBF.",
+      "no_sources": "Pick at least one source."
+    }
+  },
+  "issues": {
+    "missing_coordinates": {
+      "title": "spdbf doesn't send coordinates for some stops",
+      "description": "The DBF server at {server} returns HAFAS stops (such as BVG) without latitude and longitude, so they can't be shown on the map. DB stops still work.\n\nTo fix this, run the patched DBF image `ghcr.io/drakknar/db-fakedisplay` (see github.com/Drakknar/db-fakedisplay-patched). This notice disappears by itself once the server sends coordinates."
+    }
+  }
+}

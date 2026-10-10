@@ -1,0 +1,29 @@
+# Example dashboard cards for spdbf Nearby Stops.
+# Dashboard → Edit → Add card → Manual, then paste one card at a time.
+
+# 1. Map: follows the HA light/dark setting, shows you and the stops around you.
+type: map
+theme_mode: auto
+auto_fit: true
+hours_to_show: 0
+entities:
+  - person.you  # your person entity
+geo_location_sources:
+  - spdbf_nearby
+
+---
+# 2. Departure list for the closest stops, styled by your HA theme.
+type: markdown
+title: Nearby departures
+content: >
+  {% set stops = states.geo_location
+     | selectattr('attributes.source', 'eq', 'spdbf_nearby')
+     | sort(attribute='attributes.distance_km') | list %}
+  {% for stop in stops[:5] %}
+  **[{{ stop.name }}]({{ stop.attributes.url }})** · {{ stop.attributes.network }} · {{ stop.attributes.distance_km }} km
+  {% for d in stop.attributes.departures %}
+  - {{ d.line }} → {{ d.destination }} · {% if d.cancelled %}~~{{ d.scheduled }}~~ cancelled{% else %}{{ d.minutes }} min{% if d.delay %} (+{{ d.delay }}){% endif %}{% endif %}
+  {% endfor %}
+  {% else %}
+  No stops nearby.
+  {% endfor %}
