@@ -69,6 +69,10 @@ Each stop is a `geo_location` entity with these attributes:
 - **Entity registry:** stop entities aren't added to the registry, so stops you pass while travelling don't pile up there.
 - **History:** departures, distance and the board link aren't written to the recorder database, since they change on every refresh. Only the stop itself and its distance (the entity state) are recorded. To record nothing at all, exclude `geo_location.*` in your `recorder:` settings.
 
+## Development
+
+There are no automated tests yet. How the integration works, how changes have been checked, and the open items are in [`custom_components/spdbf_nearby/CLAUDE.md`](custom_components/spdbf_nearby/CLAUDE.md).
+
 ## License
 
 [MIT](LICENSE). The marker icons are based on [Material Design Icons](https://pictogrammers.com/library/mdi/) (Apache-2.0).
