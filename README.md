@@ -67,6 +67,7 @@ Each stop is a `geo_location` entity with these attributes:
 
 - **ÖBB fallback:** DB's IRIS feed, which DBF uses for DB stations, is currently empty for some stations (for example Berlin Zoologischer Garten). For those, the integration asks DBF's ÖBB HAFAS backend, which accepts DB station IDs.
 - **Entity registry:** stop entities aren't added to the registry, so stops you pass while travelling don't pile up there.
+- **History:** departures, distance and the board link aren't written to the recorder database, since they change on every refresh. Only the stop itself and its distance (the entity state) are recorded. To record nothing at all, exclude `geo_location.*` in your `recorder:` settings.
 
 ## License
 

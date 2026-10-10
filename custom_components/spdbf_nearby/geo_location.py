@@ -65,6 +65,18 @@ class SpdbfStop(CoordinatorEntity[SpdbfCoordinator], GeolocationEvent):
 
     _attr_source = DOMAIN
     _attr_unit_of_measurement = UnitOfLength.KILOMETERS
+    # Departures change on every refresh. Recording them would write a new
+    # attributes row per stop every scan interval, for no useful history.
+    _unrecorded_attributes = frozenset(
+        {
+            "departures",
+            "next_departure",
+            "departures_via",
+            "departures_error",
+            "distance_km",
+            "url",
+        }
+    )
 
     def __init__(self, coordinator: SpdbfCoordinator, stop: Stop) -> None:
         """Initialize the stop entity."""
