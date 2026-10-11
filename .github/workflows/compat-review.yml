@@ -11,7 +11,10 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: Review the latest versions even if already reviewed
+        description: >-
+          Repeat reviews already done for the current versions (each covers the
+          same range as the first time; a version only recorded as the starting
+          point has nothing to compare with)
         type: boolean
         default: false
 
@@ -42,7 +45,7 @@ jobs:
           FORCE: ${{ inputs.force || 'false' }}
         run: |
           set -euo pipefail
-          w() { bash .github/scripts/watch.sh "$@"; }
+          w() { bash .github/scripts/watch.sh "$@" </dev/null; }
           due() { [ "$FORCE" = true ] || [ "$(w should-run "$1")" = true ]; }
           ctx=$RUNNER_TEMP/watch-context.md
           : > "$ctx"
@@ -57,9 +60,11 @@ jobs:
           tag=$(grep "^$minor\." <<<"$tags" | grep -v b | sort -V | tail -n1 || true)
           [ -n "$tag" ] || tag=$(grep "^$minor\." <<<"$tags" | sort -V | tail -n1)
           if due "ha:$minor"; then
-            prev=$(w get ha:last)
+            # A repeat (force) covers the same range as the first review.
+            prev=$(w get "ha:from:$minor")
+            [ -n "$prev" ] || prev=$(w get ha:last)
             prev=${prev:-$(jq -r .homeassistant hacs.json)}
-            keys+=("ha:$minor=@" "ha:last=$tag")
+            keys+=("ha:$minor=@" "ha:from:$minor=$prev" "ha:last=$tag")
             subjects+=("Home Assistant $tag")
             beta=""
             case "$tag" in *b*) beta=" This is a beta; the final release follows about a week later." ;; esac
@@ -77,8 +82,12 @@ jobs:
           prev=$(w get dbf:last)
           if [ -z "$prev" ]; then
             w set "dbf:last=$sha" # first run: only record where we start
-          elif [ "$prev" != "$sha" ] && due "dbf:$sha"; then
-            keys+=("dbf:$sha=@" "dbf:last=$sha")
+          else
+            # Already reviewed: a repeat (force) covers the same range again.
+            [ "$prev" != "$sha" ] || prev=$(w get "dbf:from:$sha")
+          fi
+          if [ -n "$prev" ] && due "dbf:$sha"; then
+            keys+=("dbf:$sha=@" "dbf:from:$sha=$prev" "dbf:last=$sha")
             subjects+=("DBF ${sha:0:7}")
             cat >> "$ctx" <<CTX
           ## DBF (db-fakedisplay) server
@@ -163,6 +172,7 @@ jobs:
     needs: [detect, review]
     if: always() && needs.review.result != 'skipped'
     runs-on: ubuntu-latest
+    timeout-minutes: 75 # includes waiting for the check on a proposed fix
     permissions:
       contents: write
       issues: write
