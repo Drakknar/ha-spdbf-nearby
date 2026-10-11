@@ -77,3 +77,11 @@ There are **no automated tests** yet. What has been done for changes so far:
 - **Mobile tap shows entity details (reported 2026-10-10, unresolved):** in the Android companion app, tapping a stop on the map opened Home Assistant's entity dialog instead of the departures. The installed files matched the repository. Most likely cause: the app's cached frontend never loaded `spdbf-departures.js`. First step: reset the app's frontend cache and retry. If it persists, check in the app's WebView whether `window.__spdbfDepartures` is set and the console shows "spdbf Nearby Stops: departure list active".
 - **Idea, discussed and not wanted for now:** loading stops for the area the map is showing, instead of around the person. That would mean hooking into `ha-map`'s private engine, which can break with any HA update. It would use temporary markers rather than entities, so one viewer's panning doesn't move everyone's stops.
 - **Possible improvements:** pytest tests with a fake DBF server (as in `ha-audiocpp`), diagnostics, translations other than English.
+
+## Upstream watch
+
+`.github/workflows/compat-review.yml` runs daily. For each new version of a dependency, Claude reviews this integration once, following `.github/prompts/ha-compat.md`.
+- **Home Assistant** reviews start at the first beta of each minor release. Each change to DBF's server code (`lib/` in derf/db-fakedisplay) is reviewed too.
+- **Results:** a fix comes as a pull request; anything that needs the owner, as an issue labelled `upstream-watch` and assigned to the owner; new features worth using, as an `enhancement` issue.
+- **Access:** Claude works with read-only access (secret `CLAUDE_CODE_OAUTH_TOKEN`). A separate job opens the pull request and issues.
+- **Bookkeeping:** `.github/scripts/watch.sh` records what was reviewed on the `watch-state` branch. Run the workflow by hand with `force` to review again.
