@@ -84,4 +84,9 @@ There are **no automated tests** yet. What has been done for changes so far:
 - **Home Assistant** reviews start at the first beta of each minor release. Each change to DBF's server code (`lib/` in derf/db-fakedisplay) is reviewed too.
 - **Results:** a fix comes as a pull request; anything that needs the owner, as an issue labelled `upstream-watch` and assigned to the owner; new features worth using, as an `enhancement` issue.
 - **Access:** Claude works with read-only access (secret `CLAUDE_CODE_OAUTH_TOKEN`). A separate job opens the pull request and issues.
+- **Isolation (tested 2026-10-11):**
+  - **Before Claude runs:** the review job turns on the action's subprocess secret scrub and installs bubblewrap, so Claude's commands don't see the Claude token or any other process. It also blocks reading other processes' memory and removes sudo. Docker stays on because Claude needs it here.
+  - **After Claude:** the steps that follow ignore variables and PATH entries its commands could plant, and make the diff in a fresh clone.
+  - **Publishing:** the report job won't publish output that contains the token, or a piece of it, and deletes the review's artifact.
+  - **What's left:** Claude's commands never see the token, so leaking it would take a way around the sandbox, and Docker, which this job needs, amounts to root and is one. The scan is a second line of defence.
 - **Bookkeeping:** `.github/scripts/watch.sh` records what was reviewed on the `watch-state` branch. Run the workflow by hand with `force` to review again.
