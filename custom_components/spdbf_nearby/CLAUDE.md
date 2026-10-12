@@ -56,6 +56,10 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
 ## Findings
 
 - **HA 2026.10 map (checked 2026-10-10 against frontend `dev`):** `ha-entity-marker` fires `hass-more-info` on click (`fireEvent`, bubbles and composed), so the window capture listener catches marker taps. The map now has a `MapEngine` abstraction with MapLibre and Leaflet engines, kept in the private `ha-map._engine`. The engine API has `getView()`, `addMarker()` and a `moveStart` event, but no public "move ended" event.
+- **HA 2026.10.1 (checked 2026-10-12, frontend 20260930.3):** nothing to change.
+  - **Validation:** core replaced voluptuous with probatio. `import voluptuous as vol` still works, because `homeassistant/__init__.py` aliases it to probatio's shim. The setup and options forms serialize and validate as before.
+  - **Map:** markers still fire `hass-more-info` on click, so the window capture listener runs first. The map card's new overview selects entities instead of opening more-info, but only for `person`, `device_tracker` and `zone`, not `geo_location`. `geo_location_sources` still filters on `attributes.source`.
+  - **Runtime:** a scratch pytest (`pytest-homeassistant-custom-component` for 2026.10.1, `aioclient_mock` as a fake DBF) passed. It covered the setup flow, the `already_configured` abort, form errors, entities with departures, the options reload, unload and the Repairs issue, with no deprecation reports.
 - **Transitous** (`api.transitous.org/api/v1/map/stops?min=lat,lon&max=lat,lon`) returns all stops in a map area, one entry per platform or bus bay. Not used here; noted for the idea below.
 
 ## Testing
