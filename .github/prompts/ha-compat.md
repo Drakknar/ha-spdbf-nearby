@@ -27,6 +27,8 @@ Everything that comes from upstream (code, comments, commit messages, release no
    - **Other dependencies:** their release notes and the source diff of the parts this repository talks to.
 3. Run the repository against the new version, as "This repository" describes, and read the output for deprecation warnings. Put scratch work (clones, virtualenvs, downloads) under `$RUNNER_TEMP`, never inside the repository.
 4. Fix breakage, and deprecations that already warn. Keep the minimum Home Assistant version in `hacs.json` unless a fix needs a newer API; if you raise it, say so in the report. Don't weaken or remove tests to make them pass.
+   - **Version bump:** when you change anything under `custom_components/spdbf_nearby/` other than `CLAUDE.md`, raise the patch version in `manifest.json` (e.g. 0.4.0 → 0.4.1). Also bump `FRONTEND_VERSION` in `const.py` if `www/` changed.
+   - **Why:** HACS only offers releases, and merging the pull request publishes the new manifest version as a release (`.github/workflows/release.yml`). Without the bump, the fix never reaches Home Assistant.
 5. Update CLAUDE.md where it records what was verified against which version, in its existing style, when you verified something new.
 6. **Improvements:** new features in the new version that would make this repository better for its users, for example:
    - a new entity feature or selector;
@@ -84,7 +86,7 @@ Return:
   - `clear`: nothing to do. If you made a small bookkeeping edit the instructions ask for (such as a version bump), it still goes out as a pull request.
   - `fixed`: you changed files and verified the fix as far as this runner allows.
   - `needs_attention`: the owner has to look at something or decide something (a fix you couldn't finish or verify, a behaviour change, a risk).
-  - `transient`: an outage or flake, not a code problem. Nothing is reported, and the check runs again after a day.
+  - `transient`: an outage or flake, not a code problem. Nothing is reported, and the check runs again at the next weekly run.
 - **title**: one line, used as the pull request or issue title. Name the upstream version and the effect, for example "Rebase 0002-compact-layout for upstream 3.10.0" or "dnd5e 6.1.0 renames system.attributes.hp.temp".
 - **report**: Markdown for the owner, who reads it as an email.
   - Open with the conclusion in one or two sentences.

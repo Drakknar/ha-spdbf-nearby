@@ -170,14 +170,15 @@ The author's Home Assistant installs this integration through HACS (custom repos
 - **To release:**
   1. Bump `version` in `manifest.json`, and `FRONTEND_VERSION` in `const.py` if `www/` changed.
   2. Merge to `main`.
-  3. Run `gh release create vX.Y.Z --target main --title "X.Y.Z" --notes ...`.
+  3. `.github/workflows/release.yml` (since 2026-10-14) publishes `vX.Y.Z` on its own. It runs when `manifest.json` changes on `main`, skips a version that already has a release, and writes notes from the merged pull requests. Edit the notes on GitHub if they need more.
+- **Compatibility fixes:** the review prompt tells Claude to bump the patch version whenever it changes integration code. Merging its pull request therefore publishes the fix.
 - **Doc-only changes** don't need a release. HACS won't offer them, and nothing changes in Home Assistant.
 - **When HACS updates:** it refreshes repository data only every few hours. "Update information" on the repository in HACS checks at once.
 - **Copying by hand:** the installed `www/` had a `spdbf-departures.js.gz` next to the script (found 2026-10-14, presumably from HACS). When copying the folder by hand, delete any such `.gz`, or the old script may be served.
 
 ## Upstream watch
 
-`.github/workflows/compat-review.yml` runs daily. For each new version of a dependency, Claude reviews this integration once, following `.github/prompts/ha-compat.md`.
+`.github/workflows/compat-review.yml` runs weekly (Mondays; daily until 2026-10-14). For each new version of a dependency, Claude reviews this integration once, following `.github/prompts/ha-compat.md`.
 - **Home Assistant** reviews start at the first beta of each minor release. Each change to DBF's server code (`lib/` in derf/db-fakedisplay) is reviewed too.
 - **Results:** a fix comes as a pull request; anything that needs the owner, as an issue labelled `upstream-watch` and assigned to the owner; new features worth using, as an `enhancement` issue.
 - **Access:** Claude works with read-only access (secret `CLAUDE_CODE_OAUTH_TOKEN`). A separate job opens the pull request and issues.
