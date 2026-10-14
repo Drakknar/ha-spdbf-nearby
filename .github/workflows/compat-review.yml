@@ -1,13 +1,13 @@
 name: Compatibility review
 
-# Weekly check for new versions of what this repository depends on:
+# Daily check for new versions of what this repository depends on:
 # Home Assistant core and the DBF server.
 # Each new version is reviewed once by Claude: a fix comes as a pull request,
 # anything that needs you as an issue, and new features worth using as an
 # "enhancement" issue. What has been reviewed is kept on the watch-state branch.
 on:
   schedule:
-    - cron: "27 5 * * 1"  # Mondays
+    - cron: "27 5 * * *"
   workflow_dispatch:
     inputs:
       force:

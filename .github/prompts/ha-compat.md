@@ -86,7 +86,7 @@ Return:
   - `clear`: nothing to do. If you made a small bookkeeping edit the instructions ask for (such as a version bump), it still goes out as a pull request.
   - `fixed`: you changed files and verified the fix as far as this runner allows.
   - `needs_attention`: the owner has to look at something or decide something (a fix you couldn't finish or verify, a behaviour change, a risk).
-  - `transient`: an outage or flake, not a code problem. Nothing is reported, and the check runs again at the next weekly run.
+  - `transient`: an outage or flake, not a code problem. Nothing is reported, and the check runs again after a day.
 - **title**: one line, used as the pull request or issue title. Name the upstream version and the effect, for example "Rebase 0002-compact-layout for upstream 3.10.0" or "dnd5e 6.1.0 renames system.attributes.hp.temp".
 - **report**: Markdown for the owner, who reads it as an email.
   - Open with the conclusion in one or two sentences.
