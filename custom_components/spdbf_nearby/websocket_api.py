@@ -29,6 +29,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_nearby)
     websocket_api.async_register_command(hass, ws_board)
     websocket_api.async_register_command(hass, ws_trip)
+    websocket_api.async_register_command(hass, ws_ride)
 
 
 def _coordinator(
@@ -183,19 +184,19 @@ async def ws_board(
     )
 
 
-@websocket_api.websocket_command(
+_TRIP = vol.Any(
+    {vol.Required("id"): str, vol.Required("hafas"): str},
     {
-        vol.Required("type"): f"{DOMAIN}/trip",
-        vol.Required("trip"): vol.Any(
-            {vol.Required("id"): str, vol.Required("hafas"): str},
-            {
-                vol.Required("train"): str,
-                vol.Required("station"): str,
-                vol.Optional("scheduled"): str,
-            },
-        ),
-        _ENTRY: str,
-    }
+        vol.Required("train"): str,
+        vol.Required("station"): str,
+        vol.Optional("scheduled"): str,
+    },
+)
+_STATION = {vol.Optional("eva"): str, vol.Optional("name"): str}
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/trip", vol.Required("trip"): _TRIP, _ENTRY: str}
 )
 @websocket_api.async_response
 async def ws_trip(
@@ -217,3 +218,27 @@ async def ws_trip(
         connection.send_error(msg["id"], _error_code(err), str(err))
         return
     connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/ride",
+        vol.Required("from"): {**_STATION, vol.Optional("network"): str},
+        vol.Required("to"): _STATION,
+        vol.Optional("lines"): [str],
+        _ENTRY: str,
+    }
+)
+@websocket_api.async_response
+async def ws_ride(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Return the scheduled ride between two stations, or null."""
+    if (coordinator := _coordinator(hass, connection, msg)) is None:
+        return
+    try:
+        ride = await coordinator.client.async_ride(msg["from"], msg["to"], msg.get("lines"))
+    except DbfError as err:
+        connection.send_error(msg["id"], _error_code(err), str(err))
+        return
+    connection.send_result(msg["id"], ride)

@@ -5,7 +5,10 @@
 //   window.dbfCore.tidyLine(train, number)  "S S41" -> "S41", "OE RB10" -> "RB10"
 //   window.dbfCore.lineStyle(line, network) {background, color} or null
 //   window.dbfCore.showStop(stop)           departure dialog for a stop
+//                                           ({name, eva, network, linked?, colors?})
 //   window.dbfCore.showTrip(stop, dep)      the dialog, opened on a departure's trip
+//   window.dbfCore.ride(from, to, lines?)   scheduled ride between two stations
+//                                           ({eva?, name?, network?}): {minutes, ...} or null
 //
 // Opening a map stop (marker, entity search) shows the dialog instead of the
 // generic entity dialog; every other entity keeps Home Assistant's own. The
@@ -206,8 +209,10 @@
     return color ? { background: color, color: DARK_TEXT.has(key) ? "#212121" : "#fff" } : null;
   }
 
+  // A stop can ask for Berlin's S-/U-Bahn colours (colors: "berlin"), as the
+  // connection card does for DB stations; BVG and VBB stops always get them.
   function lineChip(line) {
-    const style = lineStyle(line, stop.network);
+    const style = lineStyle(line, stop.colors === "berlin" ? "BVG" : stop.network);
     const css = style ? ` style="background:${style.background};color:${style.color}"` : "";
     return `<span class="line"${css}>${esc(line)}</span>`;
   }
@@ -509,6 +514,13 @@
     showTrip(info, dep) {
       showStop(info);
       openTrip(dep);
+    },
+    async ride(from, to, lines) {
+      const ha = hass();
+      if (!ha) return null;
+      const request = { type: `${SOURCE}/ride`, from, to };
+      if (lines?.length) request.lines = lines;
+      return ha.callWS(request);
     },
   };
   // Name used before 0.5.0.

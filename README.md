@@ -96,6 +96,29 @@ Each stop is a `geo_location` entity with these attributes:
 | `departures_via` | The source the departures came from, when DBF's DB source was empty and the integration used its fallback (ÖBB) |
 | `departures_error` | Why no departures could be fetched, if no source had any |
 
+### Connection card
+
+For the connections you use: one card per stop, from a [db_infoscreen](https://github.com/FaserF/ha-db_infoscreen) departures sensor. Dashboard → Edit → **Add card** → **spdbf connection**, with a visual editor; no dashboard resource to add.
+
+- **Departures** with line colours (Berlin S- and U-Bahn), platform, minutes, delay and cancellations, the same look as the departure dialog.
+- **Tap a departure** for its trip, or the title for the stop's full board.
+- **Changing trains:** a row at the top links the card to the one before, e.g. "↓ 15 min ride · 4 min walk". Each part can be turned off.
+  - **Ride:** set "Ride from" to the previous card's sensor. The ride is timed on that sensor's lines (S-Bahn to S-Bahn, bus to bus), so it ends where that train arrives. It comes from BVG trip data, which needs the patched DBF image; DB's data has no reliable per-stop times for S-Bahn trains.
+  - **Walk:** the minutes you enter for the change, from where that train arrives to this card's platform.
+
+```yaml
+type: custom:spdbf-connection-card
+entity: sensor.db_infoscreen_berlin_westkreuz_departures
+title: Westkreuz        # optional
+departures: 6           # optional
+lines: [S41]            # optional: only these lines
+destinations: [Pankow]  # optional: part of the destination is enough
+ride_from: sensor.db_infoscreen_berlin_savignyplatz_departures  # optional
+walk_minutes: 4         # optional
+show_ride: true         # optional
+show_walk: true         # optional
+```
+
 ## Trips
 
 Tapping a departure in the dialog shows its trip: every stop with its time, delays and platform, and disruption notices. The station you opened it from is highlighted, and earlier stops are dimmed.

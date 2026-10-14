@@ -42,7 +42,7 @@ HAFAS_SOURCES = [
 # Served from www/. Bump FRONTEND_VERSION when anything in www/ changes, so
 # browsers and the companion app fetch the new files.
 STATIC_URL = f"/{DOMAIN}"
-FRONTEND_VERSION = "0.5.0"
+FRONTEND_VERSION = "0.6.0"
 # Map marker pictures. Names starting like this are S-/U-Bahn stations.
 RAIL_NAME_PREFIXES = ("S ", "U ", "S+U ")
 
@@ -70,6 +70,10 @@ BOARD_ROWS = 150  # rows asked from DBF; IRIS boards include arrival-only rows
 BOARD_DEPARTURES = 80
 BOARD_CACHE_TTL = timedelta(seconds=20)
 SEARCH_MAX_RESULTS = 20
+# Ride times between two stations: trips tried per lookup, and how long a
+# result is kept (scheduled ride times hardly change).
+RIDE_MAX_TRIPS = 6
+RIDE_CACHE_TTL = timedelta(minutes=10)
 
 REQUEST_TIMEOUT = 20  # seconds
 CONNECT_TIMEOUT = 5  # seconds; a server that is off fails fast

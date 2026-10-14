@@ -45,6 +45,8 @@ from .const import (
     MAX_PARALLEL_REQUESTS,
     PRIMARY_RETRY_AFTER,
     REQUEST_TIMEOUT,
+    RIDE_CACHE_TTL,
+    RIDE_MAX_TRIPS,
     SEARCH_MAX_RESULTS,
     SOURCE_DB,
     UNREACHABLE_ISSUE_AFTER,
@@ -54,8 +56,10 @@ from .stations import (
     Position,
     Stop,
     combine_boards,
+    line_key,
     link_networks,
     rank_search,
+    station_names,
     tidy_line,
 )
 
@@ -96,6 +100,7 @@ class DbfClient:
         self._iris_tz: tzinfo | None = None
         self._coordinate_issue: bool | None = None
         self._boards: dict[str, tuple[datetime, Board]] = {}
+        self._rides: dict[str, tuple[datetime, dict[str, Any] | None]] = {}
         # Reachability of your server, and the fallback's request budget.
         self._down_since: datetime | None = None
         self._down_reason = ""
@@ -493,6 +498,69 @@ class DbfClient:
         payload, fallback = await self.request_json("GET", path)
         return _iris_trip(payload, fallback)
 
+    async def async_ride(
+        self, start: dict[str, str], end: dict[str, str], lines: list[str] | None = None
+    ) -> dict[str, Any] | None:
+        """Return the scheduled ride from one station to another, or None.
+
+        start and end are {eva?, name?, network?}. DB's trip data has no
+        reliable per-stop times for S-Bahn trains (only names, or another
+        train's times), so the ride comes from HAFAS (BVG) trips: the next
+        trains from start's HAFAS stop, until one calls at end. A DB start
+        station is matched to its BVG stop with the DB + BVG rules. Needs
+        tripId from the patched DBF image; without it, None.
+        """
+        key = "ride:" + "|".join(
+            f"{station.get('eva')}/{station.get('name')}" for station in (start, end)
+        ) + "|" + ",".join(lines or [])
+        now = dt_util.utcnow()
+        if (cached := self._rides.get(key)) and now - cached[0] < RIDE_CACHE_TTL:
+            return cached[1]
+        ride = await self._find_ride(start, end, lines or [])
+        self._rides = {k: v for k, v in self._rides.items() if now - v[0] < RIDE_CACHE_TTL}
+        self._rides[key] = (now, ride)
+        return ride
+
+    async def _find_ride(
+        self, start: dict[str, str], end: dict[str, str], lines: list[str]
+    ) -> dict[str, Any] | None:
+        hafas = await self._hafas_stop(start)
+        if hafas is None:
+            return None
+        eva, service = hafas
+        board = await self.fetch_departures(eva, service, 40, 40)
+        wanted = {line_key(line) for line in lines}
+        tried = 0
+        for dep in board.departures:
+            if not (dep.get("trip") or {}).get("id"):
+                continue
+            if wanted and line_key(dep["line"]) not in wanted:
+                continue
+            tried += 1
+            if tried > RIDE_MAX_TRIPS:
+                break
+            data = await self.async_trip(dep["trip"])
+            ride = _ride_on(data, {"eva": eva, "name": start.get("name")}, end)
+            if ride:
+                return ride
+        return None
+
+    async def _hafas_stop(self, station: dict[str, str]) -> tuple[str, str] | None:
+        """Return the HAFAS (eva, service) of a station."""
+        network = station.get("network")
+        if network and network != SOURCE_DB and station.get("eva"):
+            return station["eva"], network
+        if not station.get("name"):
+            return None
+        stops, _ = await self.fetch_candidates({"q": station["name"]}, allow_fallback=False)
+        for stop in link_networks(stops):
+            members = [stop, *stop.linked]
+            if stop.source != SOURCE_DB and any(
+                _same_station({"name": m.name, "eva": m.eva}, station) for m in members
+            ):
+                return stop.eva, stop.source
+        return None
+
 
 def distance_m(stop: Stop, pos: Position | None) -> float | None:
     """Return the distance from a position to a stop."""
@@ -524,6 +592,59 @@ def _departure(
     if trip:
         dep["trip"] = trip
     return dep
+
+
+def _ride_on(
+    data: dict[str, Any], start: dict[str, str], end: dict[str, str]
+) -> dict[str, Any] | None:
+    """Return the scheduled ride on a trip from start to end, or None."""
+    if not data["times"]:
+        return None
+    stops = data["stops"]
+    first = next(
+        (i for i, stop in enumerate(stops) if stop.get("current") or _same_station(stop, start)),
+        None,
+    )
+    if first is None:
+        return None
+    last = next(
+        (i for i in range(first + 1, len(stops)) if _same_station(stops[i], end)), None
+    )
+    if last is None:
+        return None
+    leave = _minute_of_day(stops[first].get("departure") or stops[first].get("arrival"))
+    arrive = _minute_of_day(stops[last].get("arrival") or stops[last].get("departure"))
+    if leave is None or arrive is None:
+        return None
+    return {
+        "minutes": (arrive - leave) % (24 * 60),
+        "line": data["line"],
+        "departure": f"{leave // 60:02d}:{leave % 60:02d}",
+        "arrival": f"{arrive // 60:02d}:{arrive % 60:02d}",
+    }
+
+
+def _same_station(stop: dict[str, Any], station: dict[str, str]) -> bool:
+    if station.get("eva") and stop.get("eva") and str(stop["eva"]) == str(station["eva"]):
+        return True
+    if not (station.get("name") and stop.get("name")):
+        return False
+    # Either name may carry the town first (DB) or a rail prefix (BVG).
+    return bool(
+        station_names(stop["name"], drop_city=True)
+        & station_names(station["name"], drop_city=True)
+    )
+
+
+def _minute_of_day(value: Any) -> int | None:
+    """Return the minute of the day of "HH:MM" or an ISO date-time."""
+    text = str(value or "")
+    clock = text[11:16] if len(text) >= 16 else text[:5]
+    try:
+        hour, minute = (int(part) for part in clock.split(":"))
+    except ValueError:
+        return None
+    return hour * 60 + minute
 
 
 def _iso(epoch: Any) -> str | None:
@@ -586,7 +707,21 @@ def _iris_trip(payload: Any, fallback: bool) -> dict[str, Any]:
     def names(stops: list[Any]) -> list[str]:
         return [s.get("name") if isinstance(s, dict) else s for s in stops]
 
-    timed = names(pre_diff) == pre and names(post_diff) == post
+    # The timed lists may reach further than IRIS's (back to the train's
+    # origin), so compare the neighbours of this station: the stop just
+    # before and just after must be the same, and at least one must exist.
+    # At Savignyplatz two of three S-Bahn trains got the times of trains
+    # near Mannheim and Cologne (2026-10-14); this rejects those.
+    neighbours = [
+        (names(pre_diff)[-1:], pre[-1:]),
+        (names(post_diff)[:1], post[:1]),
+    ]
+    timed = all(a == b for a, b in neighbours) and any(b for _, b in neighbours)
+    # For S-Bahn trains the "timed" lists often hold only names.
+    timed = timed and any(
+        isinstance(item, dict) and (item.get("sched_arr") or item.get("sched_dep"))
+        for item in [*pre_diff, *post_diff]
+    )
 
     def stop_of(item: Any) -> dict[str, Any]:
         if not (timed and isinstance(item, dict)):

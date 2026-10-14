@@ -40,6 +40,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     # window.dbfCore.
     add_extra_js_url(hass, f"{STATIC_URL}/dbf-core.js?v={FRONTEND_VERSION}")
     add_extra_js_url(hass, f"{STATIC_URL}/spdbf-stop-search-card.js?v={FRONTEND_VERSION}")
+    add_extra_js_url(hass, f"{STATIC_URL}/spdbf-connection-card.js?v={FRONTEND_VERSION}")
     websocket_api.async_register(hass)
     return True
 
