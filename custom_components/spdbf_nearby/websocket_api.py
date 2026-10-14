@@ -82,6 +82,7 @@ def _stop_json(
         "url": coordinator.board_url(stop.eva, stop.source),
         "merged_stops": stop.merged,
         "networks": stop.networks,
+        "linked": [{"eva": s.eva, "network": s.source} for s in stop.linked],
     }
 
 
@@ -101,7 +102,7 @@ async def ws_search(
     if (coordinator := _coordinator(hass, connection, msg)) is None:
         return
     try:
-        stops = await coordinator.async_search(msg["query"])
+        stops = await coordinator.async_search(msg["query"], _position(msg))
     except DbfError as err:
         connection.send_error(msg["id"], _error_code(err), str(err))
         return
@@ -137,6 +138,9 @@ async def ws_nearby(
         vol.Required("type"): f"{DOMAIN}/board",
         vol.Required("eva"): str,
         vol.Required("network"): str,
+        vol.Optional("linked"): [
+            {vol.Required("eva"): str, vol.Required("network"): str}
+        ],
         _ENTRY: str,
     }
 )
@@ -147,12 +151,18 @@ async def ws_board(
     """Return the full departure board of a stop."""
     if (coordinator := _coordinator(hass, connection, msg)) is None:
         return
-    if msg["network"] not in coordinator.sources:
+    linked = msg.get("linked")
+    networks = {msg["network"], *(item["network"] for item in linked or [])}
+    if bad := sorted(networks - set(coordinator.sources)):
         connection.send_error(
-            msg["id"], "invalid_network", f"{msg['network']} is not a configured source"
+            msg["id"], "invalid_network", f"{', '.join(bad)} is not a configured source"
         )
         return
-    board = await coordinator.async_board(msg["eva"], msg["network"])
+    board = await coordinator.async_board(
+        msg["eva"],
+        msg["network"],
+        None if linked is None else [(item["eva"], item["network"]) for item in linked],
+    )
     connection.send_result(
         msg["id"],
         {
