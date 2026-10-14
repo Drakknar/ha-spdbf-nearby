@@ -126,25 +126,36 @@
     ? state.attributes.next_departures : [])
     .map((dep) => ({ dep, line: tidy(dep.train, dep.trainNumber) }));
 
-  // Values in first-seen order, each with what it is seen with: platform ->
-  // lines and their destinations, line -> destinations, destination -> lines.
-  const group = (rows, keyOf, describe) => {
-    const seen = new Map();
-    for (const row of rows) {
-      const key = keyOf(row);
-      if (!key) continue;
-      if (!seen.has(key)) seen.set(key, new Map());
-      const detail = seen.get(key);
-      const [sub, item] = describe(row);
-      if (!detail.has(sub)) detail.set(sub, new Set());
-      if (item) detail.get(sub).add(item);
-    }
-    return seen;
-  };
   const platformOf = ({ dep }) => String(dep.platform ?? "").trim();
   const destinationOf = ({ dep }) => String(dep.destination ?? "").trim();
-  const routes = (detail) => [...detail]
-    .map(([line, dests]) => (dests.size ? `${line} → ${[...dests].join(", ")}` : line)).join(" · ");
+  const unique = (values) => [...new Set(values.filter(Boolean))];
+
+  // Rows by platform, line or destination, in first-seen order.
+  const byKey = (rows, keyOf) => {
+    const groups = new Map();
+    for (const row of rows) {
+      const key = keyOf(row);
+      if (key) groups.set(key, [...(groups.get(key) ?? []), row]);
+    }
+    return groups;
+  };
+
+  // "U2 → Zoologischer Garten, Alexanderplatz · S41 → Landsberger Allee"
+  const routes = (rows) => [...byKey(rows, ({ line }) => line)]
+    .map(([line, onLine]) => {
+      const destinations = unique(onLine.map(destinationOf));
+      return destinations.length ? `${line} → ${destinations.join(", ")}` : line;
+    })
+    .join(" · ");
+
+  // HA loads ha-form only when an editor needs it; the tile card's editor
+  // does, so loading that makes it available to ours.
+  const loadHaForm = async () => {
+    if (customElements.get("ha-form")) return;
+    const helpers = await window.loadCardHelpers?.();
+    const tile = await helpers?.createCardElement({ type: "tile", entity: "sun.sun" });
+    await tile?.constructor.getConfigElement?.();
+  };
 
   const FILTER_FIELDS = ["platforms", "lines", "destinations"];
   const NOT_SEEN = {
@@ -158,7 +169,11 @@
   // what the card would show. Values not in the lists can still be typed.
   class SpdbfConnectionCardEditor extends HTMLElement {
     setConfig(config) {
-      this._config = config;
+      // The card also takes a single value, e.g. "lines: U2"; the form needs lists.
+      this._config = { ...config };
+      for (const field of FILTER_FIELDS) {
+        if (this._config[field] !== undefined) this._config[field] = asList(this._config[field]);
+      }
       this._render();
     }
 
@@ -173,15 +188,16 @@
       const config = this._config;
       const onPlatforms = rows.filter(departureFilter({ platforms: config.platforms }));
       const onLines = onPlatforms.filter(departureFilter({ lines: config.lines }));
-      const options = (seen, label, chosen) => {
-        const list = [...seen].map(([value, detail]) => ({ value, label: label(value, detail) }));
-        // Chosen values that aren't running now stay selectable.
-        for (const value of asList(chosen)) {
-          if (!list.some((o) => o.value.toLowerCase() === value.toLowerCase())) list.push({ value, label: `${value} (not seen now)` });
+      // A multiple select with the values seen now; chosen values that aren't
+      // running now stay listed, and others can be typed.
+      const pick = (name, groups, label) => {
+        const options = [...groups].map(([value, grouped]) => ({ value, label: label(value, grouped) }));
+        for (const value of asList(config[name])) {
+          if (!options.some((o) => o.value.toLowerCase() === value.toLowerCase())) options.push({ value, label: `${value} (not seen now)` });
         }
-        return list;
+        return { name, selector: { select: { multiple: true, custom_value: true, options } } };
       };
-      const pick = (name, list) => ({ name, selector: { select: { multiple: true, custom_value: true, options: list } } });
+      const platforms = [...byKey(rows, platformOf)].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }));
       return [
         { name: "entity", required: true, selector: { entity: { domain: "sensor", integration: "db_infoscreen" } } },
         {
@@ -193,16 +209,10 @@
           ],
         },
         { name: "departures", selector: { number: { min: 1, max: 20, mode: "box" } } },
-        pick("platforms", options(
-          new Map([...group(rows, platformOf, ({ dep, line }) => [line, destinationOf({ dep })])]
-            .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))),
-          (platform, detail) => `${platform}: ${routes(detail)}`, config.platforms)),
-        pick("lines", options(
-          group(onPlatforms, ({ line }) => line, ({ dep }) => [destinationOf({ dep })]),
-          (line, detail) => `${line} → ${[...detail.keys()].join(", ")}`, config.lines)),
-        pick("destinations", options(
-          group(onLines, destinationOf, ({ line }) => [line]),
-          (dest, detail) => `${dest} (${[...detail.keys()].join(", ")})`, config.destinations)),
+        pick("platforms", platforms, (platform, grouped) => `${platform}: ${routes(grouped)}`),
+        pick("lines", byKey(onPlatforms, ({ line }) => line), (line, grouped) => routes(grouped)),
+        pick("destinations", byKey(onLines, destinationOf),
+          (destination, grouped) => `${destination} (${unique(grouped.map(({ line }) => line)).join(", ")})`),
         { name: "ride_from", selector: { entity: { domain: "sensor", integration: "db_infoscreen" } } },
         { name: "walk_minutes", selector: { number: { min: 0, max: 60, mode: "box", unit_of_measurement: "min" } } },
         {
@@ -219,7 +229,7 @@
     // What the filters would show now, and any filter value that matches nothing.
     _checks(rows) {
       const config = this._config;
-      if (!config.entity || !this._hass?.states[config.entity]) return [];
+      if (!this._hass.states[config.entity]) return [];
       if (!rows.length) return [{ type: "info", text: "The sensor has no departures right now, so nothing can be checked." }];
       const checks = [];
       let scope = rows;
@@ -231,9 +241,8 @@
       }
       const shown = rows.filter(departureFilter(config));
       if (FILTER_FIELDS.some((field) => asList(config[field]).length)) {
-        const lines = group(shown, () => "all", ({ line, dep }) => [line, destinationOf({ dep })]).get("all");
         checks.unshift(shown.length
-          ? { type: "success", text: `Matches ${shown.length} of the sensor's ${rows.length} departures now: ${routes(lines)}` }
+          ? { type: "success", text: `Matches ${shown.length} of the sensor's ${rows.length} departures now: ${routes(shown)}` }
           : { type: "error", text: `Matches none of the sensor's ${rows.length} departures right now.` });
       }
       return checks;
@@ -333,7 +342,8 @@
 
     // A native ha-form, but its suggestions depend on the chosen sensor,
     // which getConfigForm's fixed schema can't do.
-    static getConfigElement() {
+    static async getConfigElement() {
+      await loadHaForm();
       return document.createElement("spdbf-connection-card-editor");
     }
 

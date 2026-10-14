@@ -150,7 +150,8 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
     - **Suggestions:** `select` selectors with `multiple` and `custom_value`, built from the sensor's current departures: platforms (sorted, labelled "line → destinations"), lines on the chosen platforms, destinations of the chosen lines. Chosen values not seen now stay listed as "(not seen now)".
     - **Checks (`ha-alert`):** how many current departures the filters match, on which lines; a warning per filter value that matches nothing at its step (platform, then line, then destination).
     - **Why (owner, 2026-10-14):** a destination filter (Ruhleben, Theodor-Heuss-Platz) emptied a journey card when the U2 turned back at Zoo. The platform is the direction. Compass directions and a "goes via" filter were rejected: BVG rows from DBF have no route.
-    - Empty filters are removed from the config.
+    - Empty filters are removed from the config; single values (`lines: U2`) become lists for the form.
+    - **`ha-form` loading (0.7.1):** HA loads `ha-form` only when an editor needs it, so `getConfigElement` is async and first loads the tile card's editor through `loadCardHelpers()`, the usual custom-card trick.
   - **Checked 2026-10-14** in a Node fake-DOM test on real sensor states (Schönhauser Allee U2, Westkreuz all platforms, Alexanderplatz platform 4).
 - **Stop search card (`www/spdbf-stop-search-card.js`, since 0.3.0):** `custom:spdbf-stop-search-card`. It is loaded with `add_extra_js_url` like the dialog, so no Lovelace resource is needed.
   - **Card picker:** listed through `window.customCards`, with `preview: true` and a `documentationURL`.
