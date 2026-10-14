@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
+from . import websocket_api
 from .const import DOMAIN, FRONTEND_VERSION, STATIC_URL
 from .coordinator import SpdbfCoordinator
 
@@ -23,12 +24,15 @@ type SpdbfConfigEntry = ConfigEntry[SpdbfCoordinator]
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Serve the marker icons and the departure dialog script."""
+    """Serve the marker icons, the departure dialog and the stop search card."""
     await hass.http.async_register_static_paths(
         [StaticPathConfig(STATIC_URL, str(Path(__file__).parent / "www"), True)]
     )
-    # Loaded on every page, so stops show departures wherever they are opened.
+    # Loaded on every page, so stops show departures wherever they are opened,
+    # and the card works without adding a dashboard resource.
     add_extra_js_url(hass, f"{STATIC_URL}/spdbf-departures.js?v={FRONTEND_VERSION}")
+    add_extra_js_url(hass, f"{STATIC_URL}/spdbf-stop-search-card.js?v={FRONTEND_VERSION}")
+    websocket_api.async_register(hass)
     return True
 
 

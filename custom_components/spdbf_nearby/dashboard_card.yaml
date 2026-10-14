@@ -27,3 +27,8 @@ content: >
   {% else %}
   No stops nearby.
   {% endfor %}
+
+---
+# 3. Stop search: find DB and BVG stops by name, or tap the empty field for
+#    the stops near you. Picking one opens its departures.
+type: custom:spdbf-stop-search-card
