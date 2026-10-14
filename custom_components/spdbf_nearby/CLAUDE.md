@@ -139,14 +139,27 @@ There are **no automated tests** yet. What has been done for changes so far:
 
 ## Open items
 
-- **0.3.0 (2026-10-14), not yet tested in Home Assistant:** stop search card, full-board dialog, duplicate merging, outage handling and the public fallback. Needs the DBF image with `station-name-search.pl`.
+- **0.3.0 (2026-10-14), installed but not yet tested in Home Assistant:** stop search card, full-board dialog, duplicate merging, outage handling and the public fallback. The DBF image with `station-name-search.pl` is deployed, and its name search answered on the author's server.
   - **Check:** the card's nearby list and search, the dialog's grouping at Alexanderplatz, and merged markers on the map.
   - **Companion app:** whether the browser location works in the companion app's WebView. If it doesn't, the card falls back to the tracked person.
 
-- **Install 0.2.3 (2026-10-10):** the recorder fix is pushed but not yet installed. The integration was copied into `custom_components` by hand rather than through HACS; switching to HACS is planned.
 - **Mobile tap shows entity details (reported 2026-10-10, unresolved):** in the Android companion app, tapping a stop on the map opened Home Assistant's entity dialog instead of the departures. The installed files matched the repository. Most likely cause: the app's cached frontend never loaded `spdbf-departures.js`. First step: reset the app's frontend cache and retry. If it persists, check in the app's WebView whether `window.__spdbfDepartures` is set and the console shows "spdbf Nearby Stops: departure list active".
 - **Idea, discussed and not wanted for now:** loading stops for the area the map is showing, instead of around the person. That would mean hooking into `ha-map`'s private engine, which can break with any HA update. It would use temporary markers rather than entities, so one viewer's panning doesn't move everyone's stops.
 - **Possible improvements:** pytest tests with a fake DBF server (as in `ha-audiocpp`), diagnostics, translations other than English.
+
+## Releases and HACS
+
+The author's Home Assistant installs this integration through HACS (custom repository `Drakknar/ha-spdbf-nearby`).
+
+- **Releases (since 0.3.0):** each version is a GitHub release tagged `vX.Y.Z`, matching `version` in `manifest.json`. HACS then shows the version and release notes, and offers only releases as updates.
+  - **Before 0.3.0** there were no releases. HACS tracked `main` and showed commit hashes; installed was `5cc072e`.
+- **To release:**
+  1. Bump `version` in `manifest.json`, and `FRONTEND_VERSION` in `const.py` if `www/` changed.
+  2. Merge to `main`.
+  3. Run `gh release create vX.Y.Z --target main --title "X.Y.Z" --notes ...`.
+- **Doc-only changes** don't need a release. HACS won't offer them, and nothing changes in Home Assistant.
+- **When HACS updates:** it refreshes repository data only every few hours. "Update information" on the repository in HACS checks at once.
+- **Copying by hand:** the installed `www/` had a `spdbf-departures.js.gz` next to the script (found 2026-10-14, presumably from HACS). When copying the folder by hand, delete any such `.gz`, or the old script may be served.
 
 ## Upstream watch
 
