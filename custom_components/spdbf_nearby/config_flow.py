@@ -34,6 +34,7 @@ from .const import (
     CONF_DEPARTURES,
     CONF_FALLBACK,
     CONF_FALLBACK_URL,
+    CONF_MAP_STOPS,
     CONF_MAX_STOPS,
     CONF_MERGE_DUPLICATES,
     CONF_MERGE_NETWORKS,
@@ -46,6 +47,7 @@ from .const import (
     DEFAULT_DEPARTURES,
     DEFAULT_FALLBACK,
     DEFAULT_FALLBACK_URL,
+    DEFAULT_MAP_STOPS,
     DEFAULT_MAX_STOPS,
     DEFAULT_MERGE_DUPLICATES,
     DEFAULT_MERGE_NETWORKS,
@@ -86,6 +88,9 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
                 if tracked
                 else vol.Required(CONF_TRACKED_ENTITY)
             ): EntitySelector(EntitySelectorConfig(domain=["person", "device_tracker"])),
+            vol.Required(
+                CONF_MAP_STOPS, default=values.get(CONF_MAP_STOPS, DEFAULT_MAP_STOPS)
+            ): BooleanSelector(),
             vol.Required(
                 CONF_SOURCES, default=values.get(CONF_SOURCES, DEFAULT_SOURCES)
             ): SelectSelector(

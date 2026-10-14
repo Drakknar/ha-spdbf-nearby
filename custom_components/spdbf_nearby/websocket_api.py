@@ -11,7 +11,9 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN, FRONTEND_VERSION, STATIC_URL
-from .coordinator import DbfError, Position, ServerUnreachable, SpdbfCoordinator, Stop
+from .coordinator import SpdbfCoordinator
+from .dbf import DbfError, ServerUnreachable
+from .stations import Position, Stop
 
 _ENTRY = vol.Optional("entry_id")
 _POSITION = {
@@ -26,6 +28,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_search)
     websocket_api.async_register_command(hass, ws_nearby)
     websocket_api.async_register_command(hass, ws_board)
+    websocket_api.async_register_command(hass, ws_trip)
 
 
 def _coordinator(
@@ -79,7 +82,7 @@ def _stop_json(
         "longitude": stop.longitude,
         "distance_km": None if meters is None else round(meters / 1000, 2),
         "entity_picture": f"{STATIC_URL}/marker-{stop.kind}.svg?v={FRONTEND_VERSION}",
-        "url": coordinator.board_url(stop.eva, stop.source),
+        "url": coordinator.client.board_url(stop.eva, stop.source),
         "merged_stops": stop.merged,
         "networks": stop.networks,
         "linked": [{"eva": s.eva, "network": s.source} for s in stop.linked],
@@ -102,7 +105,9 @@ async def ws_search(
     if (coordinator := _coordinator(hass, connection, msg)) is None:
         return
     try:
-        stops = await coordinator.async_search(msg["query"], _position(msg))
+        stops = await coordinator.client.async_search(
+            msg["query"], _position(msg) or coordinator.tracked_position()
+        )
     except DbfError as err:
         connection.send_error(msg["id"], _error_code(err), str(err))
         return
@@ -171,8 +176,44 @@ async def ws_board(
             "departures_via": board.via,
             "fallback": board.fallback,
             "server_unreachable": board.unreachable,
-            "url": coordinator.board_url(
+            "url": coordinator.client.board_url(
                 msg["eva"], msg["network"], board.via, board.fallback
             ),
         },
     )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/trip",
+        vol.Required("trip"): vol.Any(
+            {vol.Required("id"): str, vol.Required("hafas"): str},
+            {
+                vol.Required("train"): str,
+                vol.Required("station"): str,
+                vol.Optional("scheduled"): str,
+            },
+        ),
+        _ENTRY: str,
+    }
+)
+@websocket_api.async_response
+async def ws_trip(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Return a trip's stops, from the trip reference of a departure."""
+    if (coordinator := _coordinator(hass, connection, msg)) is None:
+        return
+    trip = msg["trip"]
+    if trip.get("hafas") and trip["hafas"] not in {*coordinator.sources, "ÖBB"}:
+        # ÖBB is the integration's own fallback for empty DB boards.
+        connection.send_error(
+            msg["id"], "invalid_network", f"{trip['hafas']} is not a configured source"
+        )
+        return
+    try:
+        result = await coordinator.client.async_trip(trip)
+    except DbfError as err:
+        connection.send_error(msg["id"], _error_code(err), str(err))
+        return
+    connection.send_result(msg["id"], result)

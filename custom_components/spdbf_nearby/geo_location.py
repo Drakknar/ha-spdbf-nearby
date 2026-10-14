@@ -12,7 +12,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import SpdbfConfigEntry
 from .const import DOMAIN, FRONTEND_VERSION, STATIC_URL
-from .coordinator import SpdbfCoordinator, Stop
+from .coordinator import SpdbfCoordinator
+from .stations import Stop
 
 # Marker kind -> icon shown in lists and dialogs. The map uses the matching
 # www/marker-<kind>.svg picture instead of the name's initials.
@@ -104,7 +105,7 @@ class SpdbfStop(CoordinatorEntity[SpdbfCoordinator], GeolocationEvent):
             "network": stop.source,
             "eva": stop.eva,
             "distance_km": self.distance,
-            "url": self.coordinator.board_url(
+            "url": self.coordinator.client.board_url(
                 stop.eva, stop.source, board.via, board.fallback
             ),
             "departures": board.departures,

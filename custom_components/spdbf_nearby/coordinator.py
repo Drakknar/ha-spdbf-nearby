@@ -1,17 +1,15 @@
-"""Data coordinator for spdbf Nearby Stops."""
+"""The map feature: stops near the tracked person, with live departures.
+
+Talking to DBF is in dbf.py and the station rules in stations.py; this
+module follows the person and keeps the nearby stops up to date. With the
+map turned off it does no polling, and only answers "nearby" requests.
+"""
 
 from __future__ import annotations
 
 import asyncio
-from collections import deque
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, tzinfo
+from datetime import datetime, timedelta
 import logging
-import re
-from typing import Any
-from urllib.parse import quote
-
-import aiohttp
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_GPS_ACCURACY, ATTR_LATITUDE, ATTR_LONGITUDE
@@ -23,124 +21,39 @@ from homeassistant.core import (
     State,
     callback,
 )
-from homeassistant.helpers import issue_registry as ir
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 from homeassistant.util.location import distance as geo_distance
 
 from .const import (
-    BOARD_CACHE_TTL,
-    BOARD_DEPARTURES,
-    BOARD_ROWS,
     CONF_DEPARTURES,
-    CONF_FALLBACK,
-    CONF_FALLBACK_URL,
+    CONF_MAP_STOPS,
     CONF_MAX_STOPS,
     CONF_MERGE_DUPLICATES,
-    CONF_MERGE_NETWORKS,
-    CONF_PUBLIC_URL,
     CONF_RADIUS,
     CONF_SCAN_INTERVAL,
-    CONF_SERVER_URL,
-    CONF_SOURCES,
     CONF_TRACKED_ENTITY,
-    CONNECT_TIMEOUT,
-    DB_FALLBACK_HAFAS,
-    DEFAULT_FALLBACK,
-    DEFAULT_FALLBACK_URL,
+    DEFAULT_MAP_STOPS,
     DEFAULT_MERGE_DUPLICATES,
-    DEFAULT_MERGE_NETWORKS,
     DOMAIN,
-    FALLBACK_MAX_REQUESTS,
     FALLBACK_STOPS,
-    FALLBACK_WINDOW,
-    IRIS_TIME_ZONE,
-    ISSUE_MISSING_COORDINATES,
-    ISSUE_SERVER_UNREACHABLE,
     MAX_GPS_ACCURACY_METERS,
-    MAX_PARALLEL_REQUESTS,
     MERGE_CANDIDATE_FACTOR,
-    MERGE_MIN_DEPARTURES,
-    MERGE_NETWORK_MAX_METERS,
     MIN_MOVE_METERS,
-    PRIMARY_RETRY_AFTER,
-    RAIL_NAME_PREFIXES,
-    REQUEST_TIMEOUT,
-    SEARCH_MAX_RESULTS,
-    SOURCE_DB,
     STOP_LOOKUP_MAX_AGE,
-    UNREACHABLE_ISSUE_AFTER,
+)
+from .dbf import DbfClient, DbfError, distance_m
+from .stations import (
+    Board,
+    Position,
+    Stop,
+    combine_boards,
+    link_networks,
+    merge_same_board,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-type Position = tuple[float, float]
-
-# Gateway errors mean the server behind a proxy is down. Other HTTP errors
-# come from DBF itself, which is up.
-_UNREACHABLE_STATUS = {502, 503, 504}
-
-
-class DbfError(Exception):
-    """DBF gave an unusable answer."""
-
-
-class ServerUnreachable(DbfError):
-    """No DBF server could be asked: yours is down and no fallback could step in."""
-
-
-@dataclass
-class Board:
-    """Departures of one stop."""
-
-    departures: list[dict[str, Any]] = field(default_factory=list)
-    # Why no departures could be fetched, if no source had any.
-    error: str | None = None
-    # HAFAS service the departures came from, when it differs from the source.
-    via: str | None = None
-    # The departures came from the public fallback instance.
-    fallback: bool = False
-    # No server could be asked (the error says why).
-    unreachable: bool = False
-
-
-@dataclass
-class Stop:
-    """A stop returned by DBF's /_geolocation endpoint."""
-
-    name: str
-    eva: str
-    source: str
-    latitude: float
-    longitude: float
-    board: Board = field(default_factory=Board)
-    # Names of nearby stops merged into this one: the same board, or the same
-    # station in another network.
-    merged: list[str] = field(default_factory=list)
-    # The same station in other networks (DB for a BVG station). Their boards
-    # add the lines this stop's own board doesn't have.
-    linked: list[Stop] = field(default_factory=list)
-
-    @property
-    def key(self) -> str:
-        """Return a key that is unique across sources."""
-        return f"{self.source}_{self.eva}"
-
-    @property
-    def networks(self) -> list[str]:
-        """Return the networks whose departures this stop shows."""
-        return list(dict.fromkeys([self.source, *(s.source for s in self.linked)]))
-
-    @property
-    def kind(self) -> str:
-        """Return the marker kind: train, bus or stop."""
-        if self.source == SOURCE_DB or self.name.startswith(RAIL_NAME_PREFIXES):
-            return "train"
-        if self.source == "BVG":
-            return "bus"
-        return "stop"
 
 
 def position_of(state: State | None) -> Position | None:
@@ -158,62 +71,46 @@ def position_of(state: State | None) -> Position | None:
 
 
 class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
-    """Look up stops near the tracked entity and keep their departures fresh.
-
-    It also answers the dashboard's stop search and departure dialog, which
-    ask for any stop rather than only the nearby ones.
-    """
+    """Look up stops near the tracked entity and keep their departures fresh."""
 
     config_entry: ConfigEntry
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, client: DbfClient) -> None:
         """Initialize the coordinator."""
         self.config = {**entry.data, **entry.options}
+        self.map_stops = bool(self.config.get(CONF_MAP_STOPS, DEFAULT_MAP_STOPS))
         super().__init__(
             hass,
             _LOGGER,
             config_entry=entry,
             name=DOMAIN,
-            update_interval=timedelta(seconds=int(self.config[CONF_SCAN_INTERVAL])),
+            # Without map stops there is nothing to keep up to date.
+            update_interval=(
+                timedelta(seconds=int(self.config[CONF_SCAN_INTERVAL]))
+                if self.map_stops
+                else None
+            ),
         )
-        self._session = async_get_clientsession(hass)
-        self._server = self.config[CONF_SERVER_URL].rstrip("/")
-        # Links default to the server URL when no public URL is set.
-        self._public = (self.config.get(CONF_PUBLIC_URL) or self._server).rstrip("/")
-        self._fallback: str | None = None
-        if self.config.get(CONF_FALLBACK, DEFAULT_FALLBACK):
-            self._fallback = (
-                self.config.get(CONF_FALLBACK_URL) or DEFAULT_FALLBACK_URL
-            ).rstrip("/")
+        self.client = client
         self.tracked = self.config[CONF_TRACKED_ENTITY]
-        self.sources: list[str] = self.config[CONF_SOURCES]
         self._radius_m = float(self.config[CONF_RADIUS]) * 1000
         self._max_stops = int(self.config[CONF_MAX_STOPS])
         self._departures = int(self.config[CONF_DEPARTURES])
         self._merge = bool(
             self.config.get(CONF_MERGE_DUPLICATES, DEFAULT_MERGE_DUPLICATES)
         )
-        self._merge_networks = bool(
-            self.config.get(CONF_MERGE_NETWORKS, DEFAULT_MERGE_NETWORKS)
-        )
-        self._semaphore = asyncio.Semaphore(MAX_PARALLEL_REQUESTS)
-        self._iris_tz: tzinfo | None = None
         self._stops: dict[str, Stop] = {}
         self._lookup_pos: Position | None = None
         self._lookup_time: datetime | None = None
-        self._coordinate_issue: bool | None = None
-        self._boards: dict[str, tuple[datetime, Board]] = {}
-        # Reachability of your server, and the fallback's request budget.
-        self._down_since: datetime | None = None
-        self._down_reason = ""
-        self._retry_at: datetime | None = None
-        self._unreachable_issue = False
-        self._fallback_requests: deque[datetime] = deque()
         self.position: Position | None = None
 
     async def _async_setup(self) -> None:
-        """Load the IRIS time zone without blocking the event loop."""
-        self._iris_tz = await dt_util.async_get_time_zone(IRIS_TIME_ZONE)
+        await self.client.async_setup()
+
+    @property
+    def sources(self) -> list[str]:
+        """Return the configured sources."""
+        return self.client.sources
 
     @callback
     def async_start_tracking(self) -> CALLBACK_TYPE:
@@ -234,28 +131,13 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
             # Small move: only the distances change, no need to ask spdbf.
             self.async_update_listeners()
 
-    @property
-    def fallback_active(self) -> bool:
-        """Return whether your server is down and the public fallback steps in."""
-        return self._fallback is not None and self._down_since is not None
-
-    def board_url(
-        self, eva: str, source: str, via: str | None = None, fallback: bool = False
-    ) -> str:
-        """Return the departure board URL for a stop."""
-        base = self._fallback if fallback and self._fallback else self._public
-        url = f"{base}/{quote(eva)}"
-        hafas = via or (None if source == SOURCE_DB else source)
-        if hafas:
-            url += f"?hafas={quote(hafas)}"
-        return url
-
     def distance_m(self, stop: Stop, pos: Position | None = None) -> float | None:
         """Return the distance from a position (default: the tracked one)."""
-        pos = pos or self.position
-        if pos is None:
-            return None
-        return geo_distance(*pos, stop.latitude, stop.longitude)
+        return distance_m(stop, pos or self.tracked_position())
+
+    def tracked_position(self) -> Position | None:
+        """Return the tracked entity's position, also without map stops."""
+        return self.position or position_of(self.hass.states.get(self.tracked))
 
     def _moved_since_lookup(self, pos: Position) -> bool:
         if self._lookup_pos is None:
@@ -272,6 +154,8 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
         )
 
     async def _async_update_data(self) -> dict[str, Stop]:
+        if not self.map_stops:
+            return {}
         pos = position_of(self.hass.states.get(self.tracked))
         if pos is not None:
             self.position = pos
@@ -302,7 +186,7 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
 
         if self._departures and not fresh:
             stops = list(self._stops.values())
-            if self.fallback_active:
+            if self.client.fallback_active:
                 stops.sort(key=lambda stop: self.distance_m(stop) or 0)
                 for stop in stops[FALLBACK_STOPS:]:
                     stop.board = Board(
@@ -314,188 +198,14 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
             await asyncio.gather(*(self._update_departures(stop) for stop in stops))
         return dict(self._stops)
 
-    # --- Talking to DBF -------------------------------------------------
-
-    async def _request_json(
-        self, method: str, path: str, *, allow_fallback: bool = True, **kwargs: Any
-    ) -> tuple[Any, bool]:
-        """Ask your DBF server, or the public fallback while yours is down.
-
-        Returns the JSON answer and whether it came from the fallback. After
-        a failure your server is skipped for PRIMARY_RETRY_AFTER, so an outage
-        costs one timeout, not one per stop.
-        """
-        if self._retry_at is None or dt_util.utcnow() >= self._retry_at:
-            try:
-                payload = await self._send(method, self._server + path, **kwargs)
-            except ServerUnreachable as err:
-                self._mark_down(str(err))
-            else:
-                self._mark_up()
-                return payload, False
-
-        message = f"Your DBF server at {self._server} isn't reachable ({self._down_reason})"
-        if not (self._fallback and allow_fallback):
-            raise ServerUnreachable(message)
-        self._take_fallback_slot()
-        try:
-            return await self._send(method, self._fallback + path, **kwargs), True
-        except ServerUnreachable as err:
-            raise ServerUnreachable(
-                f"{message}, and neither is the fallback {self._fallback} ({err})"
-            ) from err
-
-    async def _send(self, method: str, url: str, **kwargs: Any) -> Any:
-        try:
-            async with (
-                self._semaphore,
-                self._session.request(
-                    method,
-                    url,
-                    timeout=aiohttp.ClientTimeout(
-                        total=REQUEST_TIMEOUT, sock_connect=CONNECT_TIMEOUT
-                    ),
-                    **kwargs,
-                ) as resp,
-            ):
-                if resp.status in _UNREACHABLE_STATUS:
-                    raise ServerUnreachable(f"HTTP {resp.status}")
-                resp.raise_for_status()
-                return await resp.json(content_type=None)
-        except (aiohttp.ClientConnectionError, TimeoutError) as err:
-            raise ServerUnreachable(str(err) or type(err).__name__) from err
-        except (aiohttp.ClientError, ValueError) as err:
-            raise DbfError(str(err) or type(err).__name__) from err
-
-    def _take_fallback_slot(self) -> None:
-        """Count a fallback request, or refuse it if the budget is used up."""
-        now = dt_util.utcnow()
-        while self._fallback_requests and now - self._fallback_requests[0] > FALLBACK_WINDOW:
-            self._fallback_requests.popleft()
-        if len(self._fallback_requests) >= FALLBACK_MAX_REQUESTS:
-            raise ServerUnreachable(
-                f"Your DBF server at {self._server} isn't reachable, and the public"
-                f" fallback's limit of {FALLBACK_MAX_REQUESTS} requests per minute"
-                " is used up; try again shortly"
-            )
-        self._fallback_requests.append(now)
-
-    @callback
-    def _mark_down(self, reason: str) -> None:
-        now = dt_util.utcnow()
-        self._down_reason = reason
-        self._retry_at = now + PRIMARY_RETRY_AFTER
-        if self._down_since is None:
-            self._down_since = now
-            _LOGGER.warning(
-                "DBF server at %s isn't reachable (%s); %s",
-                self._server,
-                reason,
-                f"using {self._fallback} until it is back"
-                if self._fallback
-                else "retrying every minute",
-            )
-        if not self._unreachable_issue and now - self._down_since >= UNREACHABLE_ISSUE_AFTER:
-            self._unreachable_issue = True
-            ir.async_create_issue(
-                self.hass,
-                DOMAIN,
-                f"{ISSUE_SERVER_UNREACHABLE}_{self.config_entry.entry_id}",
-                is_fixable=False,
-                severity=ir.IssueSeverity.WARNING,
-                translation_key=ISSUE_SERVER_UNREACHABLE,
-                translation_placeholders={
-                    "server": self._server,
-                    "reason": reason,
-                    "fallback": (
-                        f"Departures come from the public fallback {self._fallback}"
-                        " for now, for the nearest stops only."
-                        if self._fallback
-                        else "You can turn on the public fallback in the"
-                        " integration's options to keep departures coming meanwhile."
-                    ),
-                },
-            )
-
-    @callback
-    def _mark_up(self) -> None:
-        if self._down_since is None:
-            return
-        _LOGGER.info("DBF server at %s is reachable again", self._server)
-        self._down_since = self._retry_at = None
-        self._down_reason = ""
-        # Fallback boards and lookups are replaced by your server's.
-        self._boards.clear()
-        if self._unreachable_issue:
-            self._unreachable_issue = False
-            ir.async_delete_issue(
-                self.hass, DOMAIN, f"{ISSUE_SERVER_UNREACHABLE}_{self.config_entry.entry_id}"
-            )
-
-    # --- Stops ----------------------------------------------------------
-
-    async def _fetch_candidates(
-        self, form: dict[str, str], *, allow_fallback: bool = True
-    ) -> tuple[list[Stop], bool, bool]:
-        """Ask /_geolocation once per HAFAS source.
-
-        Returns the stops of the configured sources in DBF's order, whether
-        some had to be dropped for lack of coordinates, and whether the
-        answer came from the fallback.
-        """
-        # Every /_geolocation call also returns the IRIS (DB) stations, so one
-        # call per HAFAS service covers DB too.
-        services = [s for s in self.sources if s != SOURCE_DB]
-        candidates: list[dict[str, Any]] = []
-        via_fallback = False
-        for service in services or [None]:
-            data = dict(form)
-            if service:
-                data["hafas"] = service
-            payload, from_fallback = await self._request_json(
-                "POST", "/_geolocation", data=data, allow_fallback=allow_fallback
-            )
-            via_fallback |= from_fallback
-            if not isinstance(payload, dict):
-                raise DbfError("Unexpected answer from DBF")
-            if payload.get("error"):
-                raise DbfError(str(payload["error"]))
-            if payload.get("warning"):
-                _LOGGER.debug("spdbf warning for %s: %s", service, payload["warning"])
-            candidates.extend(payload.get("candidates") or [])
-
-        stops: dict[str, Stop] = {}
-        missing_coordinates = False
-        for cand in candidates:
-            source = SOURCE_DB if cand.get("hafas") == 0 else cand.get("hafas")
-            if source not in self.sources:
-                continue
-            if cand.get("lat") is None or cand.get("lon") is None:
-                missing_coordinates = True
-                continue
-            stop = Stop(
-                name=cand["name"],
-                eva=str(cand["eva"]),
-                source=source,
-                latitude=float(cand["lat"]),
-                longitude=float(cand["lon"]),
-            )
-            stops.setdefault(stop.key, stop)
-        return list(stops.values()), missing_coordinates, via_fallback
-
     async def _fetch_stops(
         self, pos: Position, *, allow_fallback: bool = True
     ) -> tuple[list[Stop], bool]:
         """Return the stops within the radius, nearest first, and whether
         they came from the fallback."""
-        stops, missing_coordinates, via_fallback = await self._fetch_candidates(
+        stops, via_fallback = await self.client.fetch_candidates(
             {"lat": str(pos[0]), "lon": str(pos[1])}, allow_fallback=allow_fallback
         )
-        # The public instance never sends HAFAS coordinates; that's no
-        # reason to tell you to patch your own server.
-        if not via_fallback:
-            self._set_coordinate_issue(missing_coordinates)
-
         in_range = []
         for stop in stops:
             if previous := self._stops.get(stop.key):
@@ -510,381 +220,68 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
         """Keep the nearest stops, merging stops that are one station.
 
         Returns the stops, and whether their departures were just fetched.
-
-        - **Same network, same board:** BVG lists one station several times
-          (S+U Alexanderplatz Bhf, .../Dircksenstr., .../Gontardstr., ...),
-          and their boards are identical. Only exact duplicates are merged:
-          similar names are no safe guide, since a tram stop with the same
-          name can have a board of its own.
-        - **DB and BVG:** a DB station and a BVG rail stop of the same name
-          close by (Berlin Savignyplatz, S Savignyplatz) are linked; see
-          _link_networks.
+        Stops with the same board merge (stations.merge_same_board), and a
+        DB station joins its BVG rail stop (stations.link_networks).
         """
         merge_boards = self._merge and bool(self._departures)
-        if not (merge_boards or self._merge_networks):
+        if not (merge_boards or self.client.merge_networks):
             return {stop.key: stop for stop in candidates[: self._max_stops]}, False
 
         pool = candidates[: self._max_stops * MERGE_CANDIDATE_FACTOR]
         if merge_boards:
             await asyncio.gather(*(self._update_departures(stop) for stop in pool))
-
-        groups: dict[Any, list[Stop]] = {}
-        for stop in pool:
-            signature = _board_signature(stop) if merge_boards else None
-            groups.setdefault(signature or stop.key, []).append(stop)
-
-        stops = []
-        # Groups keep the order of their nearest stop.
-        for group in groups.values():
-            # The shortest name is usually the station itself, without the
-            # street of its exit or bus bay.
-            keep = min(group, key=lambda stop: len(stop.name))
-            keep.merged = [stop.name for stop in group if stop is not keep]
-            stops.append(keep)
-        if self._merge_networks:
-            stops = _link_networks(stops)
-        picked = stops[: self._max_stops]
+            pool = merge_same_board(pool)
+        if self.client.merge_networks:
+            pool = link_networks(pool)
+        picked = pool[: self._max_stops]
         if merge_boards:
             for stop in picked:
                 if stop.linked:
-                    stop.board = _combine_boards(
+                    stop.board = combine_boards(
                         stop.board, [s.board for s in stop.linked], self._departures
                     )
         return {stop.key: stop for stop in picked}, merge_boards
 
-    async def async_search(self, query: str, pos: Position | None = None) -> list[Stop]:
-        """Return the stops whose name matches, best matches first.
-
-        DB's station list matches loosely ("Neanderthal" for
-        "Alexanderplatz"), and DBF lists DB before BVG. So stops whose name
-        contains the query come first, then the nearest (from pos, else the
-        tracked entity); DBF's order breaks ties.
-        """
-        try:
-            # Stock DBF (the public fallback) can't search by name as JSON.
-            stops, _, _ = await self._fetch_candidates({"q": query}, allow_fallback=False)
-        except ServerUnreachable as err:
-            raise ServerUnreachable(f"Search needs your own DBF server. {err}") from err
-        except DbfError as err:
-            if "lon/lat" in str(err):
-                raise DbfError(
-                    "This DBF server can't search by name. Use the patched image"
-                    " ghcr.io/drakknar/db-fakedisplay (station-name-search)."
-                ) from err
-            raise
-        if self._merge_networks:
-            stops = _link_networks(stops)
-        wanted = _search_text(query)
-        wanted_names = _station_names(query, drop_city=False)
-
-        def rank(stop: Stop) -> tuple[int, bool, float]:
-            # Only DB names start with the town; in BVG's the first word is
-            # part of the name ("Uhlandstr./Kantstr.").
-            members = [stop, *stop.linked]
-            if any(
-                _station_names(s.name, drop_city=s.source == SOURCE_DB) & wanted_names
-                for s in members
-            ):
-                tier = 0  # the station itself: "S+U Alexanderplatz Bhf (Berlin)"
-            elif any(wanted in _search_text(s.name) for s in members):
-                tier = 1  # e.g. its exits: "S+U Alexanderplatz Bhf/Gontardstr."
-            else:
-                tier = 2
-            meters = self.distance_m(stop, pos)
-            # Among equal names, a DB + BVG station before a bus bay.
-            return tier, not stop.linked, meters if meters is not None else float("inf")
-
-        stops.sort(key=rank)
-        return stops[:SEARCH_MAX_RESULTS]
+    async def _update_departures(self, stop: Stop) -> None:
+        # IRIS boards include arrival-only entries, so ask for extra rows.
+        stop.board = await self.client.fetch_departures(
+            stop.eva,
+            stop.source,
+            self._departures * 3,
+            self._departures,
+            [(s.eva, s.source) for s in stop.linked],
+        )
 
     async def async_nearby(self, pos: Position | None) -> list[Stop]:
-        """Return the stops near a position, nearest first.
+        """Return the stops near a position (default: the tracked one).
 
         Near the tracked entity, these are the stops already on the map, with
-        duplicates merged. Elsewhere it's a fresh lookup.
+        duplicates merged. Elsewhere, or without map stops, it's a lookup.
         """
-        if pos is None or (
-            self.position is not None
-            and (moved := geo_distance(*pos, *self.position)) is not None
-            and moved < MIN_MOVE_METERS
+        if self.map_stops and (
+            pos is None
+            or (
+                self.position is not None
+                and (moved := geo_distance(*pos, *self.position)) is not None
+                and moved < MIN_MOVE_METERS
+            )
         ):
             stops = list((self.data or {}).values())
             stops.sort(key=lambda stop: self.distance_m(stop) or 0)
             return stops
+        pos = pos or self.tracked_position()
+        if pos is None:
+            return []
         stops, _ = await self._fetch_stops(pos)
-        if self._merge_networks:
-            stops = _link_networks(stops)
+        if self.client.merge_networks:
+            stops = link_networks(stops)
         return stops[: self._max_stops]
-
-    # --- Departures -----------------------------------------------------
 
     async def async_board(
         self, eva: str, source: str, linked: list[tuple[str, str]] | None = None
     ) -> Board:
-        """Return the full departure board of any stop, briefly cached.
-
-        linked lists the same station in other networks as (eva, source), as
-        search results carry it; their missing lines are included. Without
-        it, a stop on the map uses the stations it is linked to.
-        """
+        """Return a stop's full board; a map stop brings its linked stations."""
         if linked is None:
             stop = self._stops.get(f"{source}_{eva}")
             linked = [(s.eva, s.source) for s in stop.linked] if stop else []
-        # The public fallback's requests are scarce: own board only.
-        if self.fallback_active:
-            linked = []
-        key = "+".join(f"{s}_{e}" for e, s in [(eva, source), *linked])
-        now = dt_util.utcnow()
-        if (cached := self._boards.get(key)) and now - cached[0] < BOARD_CACHE_TTL:
-            return cached[1]
-        board, *others = await asyncio.gather(
-            self._fetch_departures(eva, source, BOARD_ROWS, BOARD_DEPARTURES),
-            *(
-                self._fetch_departures(e, s, BOARD_ROWS, BOARD_DEPARTURES)
-                for e, s in linked
-            ),
-        )
-        if others:
-            board = _combine_boards(board, others, BOARD_DEPARTURES)
-        self._boards = {
-            k: v for k, v in self._boards.items() if now - v[0] < BOARD_CACHE_TTL
-        }
-        if not board.unreachable:
-            self._boards[key] = (now, board)
-        return board
-
-    async def _update_departures(self, stop: Stop) -> None:
-        # IRIS boards include arrival-only entries, so ask for extra rows.
-        rows, keep = self._departures * 3, self._departures
-        # The public fallback's requests are scarce: own board only.
-        linked = [] if self.fallback_active else stop.linked
-        board, *others = await asyncio.gather(
-            self._fetch_departures(stop.eva, stop.source, rows, keep),
-            *(self._fetch_departures(s.eva, s.source, rows, keep) for s in linked),
-        )
-        stop.board = _combine_boards(board, others, keep) if others else board
-
-    async def _fetch_departures(
-        self, eva: str, source: str, rows: int, keep: int
-    ) -> Board:
-        if source == SOURCE_DB:
-            # DB's IRIS feed is empty for some stations (e.g. Berlin
-            # Zoologischer Garten). ÖBB's HAFAS knows DB station numbers and
-            # fills the gap.
-            attempts = [(None, self._parse_iris), (DB_FALLBACK_HAFAS, self._parse_hafas)]
-        else:
-            attempts = [(source, self._parse_hafas)]
-
-        errors = []
-        for hafas, parse in attempts:
-            try:
-                departures, error, fallback = await self._fetch_board(
-                    eva, hafas, parse, rows
-                )
-            except ServerUnreachable as err:
-                # No point trying the next backend on the same server.
-                return Board(error=str(err), unreachable=True)
-            except DbfError as err:
-                _LOGGER.debug("Departures for %s (%s) failed: %s", eva, hafas, err)
-                errors.append(str(err))
-                continue
-            if departures:
-                return Board(
-                    departures=departures[:keep],
-                    via=hafas if hafas != source else None,
-                    fallback=fallback,
-                )
-            if error:
-                errors.append(error)
-        return Board(error="; ".join(errors) or None)
-
-    async def _fetch_board(
-        self, eva: str, hafas: str | None, parse: Any, rows: int
-    ) -> tuple[list[dict[str, Any]], str | None, bool]:
-        """Return a stop's departures from one backend, its error if any, and
-        whether they came from the fallback."""
-        params = {"mode": "json", "limit": str(rows)}
-        if hafas:
-            params["hafas"] = hafas
-        payload, fallback = await self._request_json(
-            "GET", f"/{quote(eva)}", params=params
-        )
-        if not isinstance(payload, dict):
-            return [], "unexpected response from spdbf", fallback
-
-        now = dt_util.now()
-        departures = [
-            dep
-            for raw in payload.get("departures") or []
-            if (dep := parse(raw, now)) is not None
-        ]
-        departures.sort(key=lambda dep: dep["minutes"])
-        # DBF answers HTTP 300 with an "error" field when a backend has no data.
-        return departures, payload.get("error"), fallback
-
-    def _parse_iris(self, raw: dict[str, Any], now: datetime) -> dict[str, Any] | None:
-        scheduled = raw.get("scheduledDeparture")
-        if not scheduled:
-            return None  # terminates here
-        try:
-            hour, minute = (int(part) for part in scheduled.split(":"))
-        except ValueError:
-            return None
-        local_now = now.astimezone(self._iris_tz)
-        when = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        # Boards only span a few hours, so pick the closest day around midnight.
-        if when < local_now - timedelta(hours=12):
-            when += timedelta(days=1)
-        elif when > local_now + timedelta(hours=12):
-            when -= timedelta(days=1)
-        return _departure(raw, when, raw.get("delayDeparture") or 0, now)
-
-    def _parse_hafas(self, raw: dict[str, Any], now: datetime) -> dict[str, Any] | None:
-        if raw.get("scheduledTime") is None:
-            return None
-        when = dt_util.as_local(dt_util.utc_from_timestamp(raw["scheduledTime"]))
-        return _departure(raw, when, raw.get("delay") or 0, now)
-
-    @callback
-    def _set_coordinate_issue(self, missing: bool) -> None:
-        if missing == self._coordinate_issue:
-            return
-        self._coordinate_issue = missing
-        if missing:
-            _LOGGER.warning(
-                "spdbf at %s returns HAFAS stops without coordinates; they are"
-                " hidden from the map until the container is patched",
-                self._server,
-            )
-            ir.async_create_issue(
-                self.hass,
-                DOMAIN,
-                ISSUE_MISSING_COORDINATES,
-                is_fixable=False,
-                severity=ir.IssueSeverity.WARNING,
-                translation_key=ISSUE_MISSING_COORDINATES,
-                translation_placeholders={"server": self._server},
-            )
-        else:
-            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_MISSING_COORDINATES)
-
-
-def _line_key(line: Any) -> str:
-    """Return a line name comparable across networks ("S 7" and "S7")."""
-    return re.sub(r"\s+", "", str(line or "")).upper()
-
-
-def _search_text(text: str) -> str:
-    """Return text for matching a typed query: lower case, words only."""
-    text = re.sub(r"stra(ß|ss)e\b|str\.", "str", text.lower())
-    return " ".join(re.sub(r"[^\w]+", " ", text).split())
-
-
-def _station_names(name: str, *, drop_city: bool) -> set[str]:
-    """Return comparable forms of a station name.
-
-    DB names start with the town ("Berlin Savignyplatz", "Berlin-Spandau"),
-    BVG names end with it in brackets and start with the rail mode
-    ("S Savignyplatz (Berlin)", "S+U Friedrichstr. Bhf (Berlin)"). With
-    drop_city, the form without the first word (the town) is included too.
-    """
-    n = name.lower()
-    n = re.sub(r"\[[^\]]*\]|\([^)]*\)", " ", n)  # [Bus], (Berlin), (S), (tief)
-    n = re.sub(r"^\s*(s\+u|s|u)\s+", "", n)
-    n = re.sub(r"stra(ß|ss)e\b|str\.", "str", n)
-    n = re.sub(r"\bhbf\b", "hauptbahnhof", n)
-    n = re.sub(r"\bbhf\b", " ", n)
-    words = re.sub(r"[^\w]+", " ", n).split()
-    forms = {" ".join(words)}
-    if drop_city and len(words) > 1:
-        forms.add(" ".join(words[1:]))
-    return forms - {""}
-
-
-def _link_networks(stops: list[Stop]) -> list[Stop]:
-    """Link each DB station to the BVG (HAFAS) rail stop of the same station.
-
-    The HAFAS stop stays: its board has the U-Bahn, trams and buses, and the
-    S-Bahn like DB's. The DB station joins its merged names and only adds
-    the lines missing there (regional and long-distance trains). Bus and
-    tram stops never qualify, so "Savignyplatz (Berlin)", the bus stop,
-    stays separate from the station.
-    """
-    hafas_rail = [
-        stop
-        for stop in stops
-        if stop.source != SOURCE_DB and stop.name.startswith(RAIL_NAME_PREFIXES)
-    ]
-    kept: list[Stop] = []
-    for stop in stops:
-        if stop.source == SOURCE_DB:
-            names = _station_names(stop.name, drop_city=True)
-            matches = []
-            for other in hafas_rail:
-                if not _station_names(other.name, drop_city=False) & names:
-                    continue
-                dist = geo_distance(
-                    stop.latitude, stop.longitude, other.latitude, other.longitude
-                )
-                if dist is not None and dist <= MERGE_NETWORK_MAX_METERS:
-                    matches.append((dist, other))
-            if matches:
-                target = min(matches, key=lambda item: item[0])[1]
-                target.linked.append(stop)
-                target.merged.extend([stop.name, *stop.merged])
-                continue
-        kept.append(stop)
-    return kept
-
-
-def _combine_boards(own: Board, others: list[Board], keep: int) -> Board:
-    """Add the lines of other networks' boards that the own board lacks.
-
-    DB and BVG both list the S-Bahn; taking each line from one board only
-    avoids showing a train twice, without matching individual trips.
-    """
-    if own.unreachable:
-        return own
-    departures = list(own.departures)
-    lines = {_line_key(dep["line"]) for dep in departures}
-    for other in others:
-        added = [dep for dep in other.departures if _line_key(dep["line"]) not in lines]
-        lines |= {_line_key(dep["line"]) for dep in added}
-        departures.extend(added)
-    departures.sort(key=lambda dep: dep["minutes"])
-    return Board(
-        departures=departures[:keep],
-        error=None if departures else own.error,
-        via=own.via,
-        fallback=own.fallback,
-    )
-
-
-def _board_signature(stop: Stop) -> tuple[Any, ...] | None:
-    """Return what identifies a stop's board, if it has enough departures."""
-    if len(stop.board.departures) < MERGE_MIN_DEPARTURES:
-        return None
-    return (
-        stop.source,
-        *(
-            (dep["line"], dep["destination"], dep["scheduled"])
-            for dep in stop.board.departures
-        ),
-    )
-
-
-def _departure(
-    raw: dict[str, Any], scheduled: datetime, delay: int, now: datetime
-) -> dict[str, Any] | None:
-    expected = scheduled + timedelta(minutes=delay)
-    if expected < now - timedelta(minutes=1):
-        return None
-    return {
-        "line": raw.get("train"),
-        "destination": raw.get("destination"),
-        "platform": raw.get("platform"),
-        "scheduled": dt_util.as_local(scheduled).strftime("%H:%M"),
-        "delay": delay,
-        "minutes": max(0, int((expected - now).total_seconds() // 60)),
-        "cancelled": bool(raw.get("isCancelled")),
-    }
+        return await self.client.async_board(eva, source, linked)

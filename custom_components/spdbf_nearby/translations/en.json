@@ -8,6 +8,7 @@
           "server_url": "Server URL (used by Home Assistant)",
           "public_url": "Public URL (for links to departure boards)",
           "tracked_entity": "Person or device to follow",
+          "map_stops": "Show nearby stops on the map",
           "sources": "Sources",
           "radius": "Search radius",
           "max_stops": "Maximum number of stops",
@@ -26,7 +27,8 @@
           "merge_duplicates": "Show one stop when several nearby stops have exactly the same departures, as BVG lists some stations several times (e.g. Alexanderplatz).",
           "merge_networks": "Show a DB station and the BVG S-/U-Bahn stop of the same station as one stop, e.g. Berlin Savignyplatz and S Savignyplatz. Its departures show all BVG lines plus the DB lines BVG doesn't list, such as regional trains.",
           "fallback": "Off by default. The public instance runs stock DBF: it allows about 10 requests per minute, so only the nearest 3 stops keep updating, and it has no stop search and no coordinates for BVG stops. Your server is retried every minute and used again as soon as it answers.",
-          "fallback_url": "Only used when the option above is on."
+          "fallback_url": "Only used when the option above is on.",
+          "map_stops": "Off: no stop entities and no polling. The stop search card, departure dialog and trip view still work, and \"near you\" uses the device's location or this person's."
         }
       }
     },
@@ -47,6 +49,7 @@
           "server_url": "Server URL (used by Home Assistant)",
           "public_url": "Public URL (for links to departure boards)",
           "tracked_entity": "Person or device to follow",
+          "map_stops": "Show nearby stops on the map",
           "sources": "Sources",
           "radius": "Search radius",
           "max_stops": "Maximum number of stops",
@@ -63,7 +66,8 @@
           "merge_duplicates": "Show one stop when several nearby stops have exactly the same departures, as BVG lists some stations several times (e.g. Alexanderplatz).",
           "merge_networks": "Show a DB station and the BVG S-/U-Bahn stop of the same station as one stop, e.g. Berlin Savignyplatz and S Savignyplatz. Its departures show all BVG lines plus the DB lines BVG doesn't list, such as regional trains.",
           "fallback": "Off by default. The public instance runs stock DBF: it allows about 10 requests per minute, so only the nearest 3 stops keep updating, and it has no stop search and no coordinates for BVG stops. Your server is retried every minute and used again as soon as it answers.",
-          "fallback_url": "Only used when the option above is on."
+          "fallback_url": "Only used when the option above is on.",
+          "map_stops": "Off: no stop entities and no polling. The stop search card, departure dialog and trip view still work, and \"near you\" uses the device's location or this person's."
         }
       }
     },

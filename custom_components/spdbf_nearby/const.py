@@ -14,6 +14,7 @@ CONF_DEPARTURES = "departures"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_MERGE_DUPLICATES = "merge_duplicates"
 CONF_MERGE_NETWORKS = "merge_networks"
+CONF_MAP_STOPS = "map_stops"
 CONF_FALLBACK = "fallback"
 CONF_FALLBACK_URL = "fallback_url"
 
@@ -23,6 +24,7 @@ DEFAULT_DEPARTURES = 5
 DEFAULT_SCAN_INTERVAL = 60  # seconds
 DEFAULT_MERGE_DUPLICATES = True
 DEFAULT_MERGE_NETWORKS = True
+DEFAULT_MAP_STOPS = True
 DEFAULT_FALLBACK = False
 DEFAULT_FALLBACK_URL = "https://dbf.finalrewind.org"
 
@@ -40,7 +42,7 @@ HAFAS_SOURCES = [
 # Served from www/. Bump FRONTEND_VERSION when anything in www/ changes, so
 # browsers and the companion app fetch the new files.
 STATIC_URL = f"/{DOMAIN}"
-FRONTEND_VERSION = "0.4.1"
+FRONTEND_VERSION = "0.5.0"
 # Map marker pictures. Names starting like this are S-/U-Bahn stations.
 RAIL_NAME_PREFIXES = ("S ", "U ", "S+U ")
 
