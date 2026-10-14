@@ -37,6 +37,7 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
                                 colours), showStop (departure dialog), showTrip; also replaces
                                 more-info for stop entities (window.spdbfShowStop: old name)
       spdbf-stop-search-card.js custom:spdbf-stop-search-card, the stop search card
+      spdbf-connection-card.js  custom:spdbf-connection-card: one connection from a db_infoscreen sensor
       marker-{train,bus,stop}.svg   Map marker pictures (entity_picture)
     dashboard_card.yaml Example map card and Markdown departures card
     translations/en.json
@@ -126,6 +127,18 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
     - **Shown:** the trip's stops with times and delays, and platforms. Stops before the station are dimmed; the station itself is bold, matched by eva, the `current` flag or name.
     - **Also:** HIM messages (e.g. lifts out of order), and a note when DBF has only stop names.
     - **Back:** "← Departures" returns to the board.
+- **Connection card (`www/spdbf-connection-card.js`, since 0.6.0):** `custom:spdbf-connection-card` shows one stop's departures from a db_infoscreen sensor. It replaces the owner's fork `Drakknar/ha-dbf-departures-card` on the Public transport dashboard. db_infoscreen stays, by the owner's choice.
+  - **Options:** `entity`, `title`, `icon`, `departures`, `lines`, `destinations` (case-insensitive part of the name), `walk_minutes`.
+  - **Walk time:** shows "↓ N min walk" above the card. It replaces the dashboard's hand-written "↓ N Mins" markdown, which is the walk between the arrival platform and the next departure platform.
+  - **Everything via `window.dbfCore`:** line names (`tidyLine`), Berlin S-/U-Bahn colours (`lineStyle(line, "BVG")`), a tap on a departure (`showTrip`) and a tap on the title (`showStop`).
+    - **Berlin colours in the dialog:** the card passes `colors: "berlin"`, so the dialog uses them for DB stations too.
+  - **db_infoscreen rows:**
+    - **DB (IRIS)** rows have `scheduledDeparture` ("HH:MM"), a route and a train number. Their trip is `{train: "<type> <number>", station: <station name>}`; DBF's `/z/` accepts station names.
+    - **HAFAS** rows have `scheduledTime`, and `trip_id` (null until DBF sends `tripId`). Without a trip id, a tap opens the board.
+    - **Network:** HAFAS rows are taken as BVG, since db_infoscreen doesn't expose its data source.
+    - **Minutes** come from `departure_timestamp`, which is real-time.
+  - **Editor:** `getConfigForm` with entity (filtered to db_infoscreen sensors), title and icon in a grid, number, text-multiple and number (min) selectors.
+  - **Checked 2026-10-14** in a Node fake-DOM test on real sensor states (Savignyplatz DB, Alexanderplatz BVG with the U2/Pankow filter).
 - **Stop search card (`www/spdbf-stop-search-card.js`, since 0.3.0):** `custom:spdbf-stop-search-card`. It is loaded with `add_extra_js_url` like the dialog, so no Lovelace resource is needed.
   - **Card picker:** listed through `window.customCards`, with `preview: true` and a `documentationURL`.
   - **Visual editor (since 0.3.1):** `static getConfigForm()` returns an `ha-form` schema, which HA's card editor renders natively; no editor element of our own. Checked 2026-10-14 in frontend 20260930.3: the card editor resolves the custom element class and calls its `getConfigForm`, as for built-in cards.
