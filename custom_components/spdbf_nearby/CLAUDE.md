@@ -109,6 +109,12 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
   - **What DB sends:** IRIS writes `S S41`, `S 5`, `OE RB10`, `STR M10`, or `ICE` with the number apart. BVG writes `S41`, `RB10`, `M10`.
   - **Rules:** a second word that already contains letters and digits is taken as is. `S/U/RE/RB/IRE/MEX/RS` + number are joined. Long-distance trains keep the space (`ICE 1107`).
   - **Bug fixed:** 0.4.x compared raw names, so the DB + BVG merge kept DB's `S S3` next to BVG's `S3`, and those lines got no colour. Checked live 2026-10-14: the merged Alexanderplatz board now has no S-Bahn train twice.
+- **Ride times (since 0.6.0, `DbfClient.async_ride`):** they come from HAFAS (BVG) trips, because DB's are useless for this.
+  - **DB data, checked live 2026-10-14 at Savignyplatz:** for S-Bahn trains, `route_*_diff` is either names only, or another train's times (trains near Mannheim and Cologne).
+  - **Finding the start stop:** a DB start station is matched to its BVG rail stop via search + `link_networks`.
+  - **Trains tried:** the next trains from there on the given lines (at most 6, those with a `tripId`), until one calls at the end station (eva, or name via `station_names`). The result is minutes between scheduled departure and arrival.
+  - **Without `tripId`** (unpatched DBF) there is no ride. The card then shows only the walk.
+  - **DB trip view** counts times only if the neighbouring stops match IRIS's and the timed stops really carry times.
 - **Trips (since 0.5.0, `spdbf_nearby/trip`, DBF only; Transitous is dropped by the owner's choice):** each departure carries `trip`.
   - **BVG/HAFAS:** `trip` is `{id, hafas}`, and the trip is `GET /z/<id>.json?hafas=<service>` (`journey.route`). The id needs the DBF patch `hafas-trip-id.pl`; without it, BVG departures have no `trip`.
   - **DB/IRIS:** `trip` is `{train: "<type> <number>", station: eva, scheduled}`, and the trip is `GET /z/<train>/<eva>.json` (`departure`).
@@ -129,7 +135,10 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
     - **Back:** "← Departures" returns to the board.
 - **Connection card (`www/spdbf-connection-card.js`, since 0.6.0):** `custom:spdbf-connection-card` shows one stop's departures from a db_infoscreen sensor. It replaces the owner's fork `Drakknar/ha-dbf-departures-card` on the Public transport dashboard. db_infoscreen stays, by the owner's choice.
   - **Options:** `entity`, `title`, `icon`, `departures`, `lines`, `destinations` (case-insensitive part of the name), `walk_minutes`.
-  - **Walk time:** shows "↓ N min walk" above the card. It replaces the dashboard's hand-written "↓ N Mins" markdown, which is the walk between the arrival platform and the next departure platform.
+  - **Link row:** "↓ 15 min ride · 4 min walk" above the card; `show_ride` and `show_walk` turn each part off. It replaces the dashboard's hand-written "↓ N Mins" markdown.
+    - **Ride (`ride_from`, the previous card's sensor):** `spdbf_nearby/ride` `{from: {eva, name, network}, to: {eva, name}, lines}` is called with the distinct tidy lines of that sensor's departures. Owner's rule: leaving at an S-Bahn station you arrive at an S-Bahn station, bus to bus, so the ride ends where that train arrives. At Alexanderplatz that's the S-Bahn, then you change to the U2.
+    - **Walk (`walk_minutes`, typed in):** the change from there to this card's platform.
+    - **Refresh:** the ride is cached in the card and the backend for 10 minutes.
   - **Everything via `window.dbfCore`:** line names (`tidyLine`), Berlin S-/U-Bahn colours (`lineStyle(line, "BVG")`), a tap on a departure (`showTrip`) and a tap on the title (`showStop`).
     - **Berlin colours in the dialog:** the card passes `colors: "berlin"`, so the dialog uses them for DB stations too.
   - **db_infoscreen rows:**

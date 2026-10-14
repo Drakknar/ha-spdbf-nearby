@@ -70,6 +70,10 @@ BOARD_ROWS = 150  # rows asked from DBF; IRIS boards include arrival-only rows
 BOARD_DEPARTURES = 80
 BOARD_CACHE_TTL = timedelta(seconds=20)
 SEARCH_MAX_RESULTS = 20
+# Ride times between two stations: trips tried per lookup, and how long a
+# result is kept (scheduled ride times hardly change).
+RIDE_MAX_TRIPS = 6
+RIDE_CACHE_TTL = timedelta(minutes=10)
 
 REQUEST_TIMEOUT = 20  # seconds
 CONNECT_TIMEOUT = 5  # seconds; a server that is off fails fast

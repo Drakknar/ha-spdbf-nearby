@@ -1,8 +1,10 @@
 // spdbf Nearby Stops: a dashboard card for one connection you use, from a
 // db_infoscreen sensor. It uses the frontend core (dbf-core.js) for line
 // names and colours, and for the departure dialog: tapping a departure opens
-// its trip, tapping the title the stop's full board. An optional walk time
-// links it to the card before ("↓ 4 min walk"), for changing trains.
+// its trip, tapping the title the stop's full board. A link row joins it to
+// the card before, for changing trains: "↓ 15 min ride · 4 min walk". The
+// ride is timed on the previous card's lines (S-Bahn to S-Bahn, bus to bus),
+// so it ends where that train arrives; the walk is the change from there.
 // Loaded on every page by the integration, so no dashboard resource is needed.
 //
 //   type: custom:spdbf-connection-card
@@ -11,11 +13,16 @@
 //   departures: 6                    # optional
 //   lines: [S41]                     # optional filters
 //   destinations: [Pankow]           #   (part of the destination is enough)
+//   ride_from: sensor.db_infoscreen_berlin_savignyplatz_departures
+//                                    # optional: the previous card's sensor
 //   walk_minutes: 4                  # optional walk from the previous card
+//   show_ride: true                  # optional, turn either part off
+//   show_walk: true
 (() => {
   if (customElements.get("spdbf-connection-card")) return;
 
   const TICK_MS = 30000; // keeps "in N min" current between sensor updates
+  const RIDE_REFRESH_MS = 10 * 60000; // scheduled ride times hardly change
   const DEFAULT_DEPARTURES = 6;
 
   const STYLE = `
@@ -25,6 +32,7 @@
       display: flex; align-items: center; gap: 8px; padding: 8px 16px 0;
       color: var(--secondary-text-color, #727272); font-size: 13px;
     }
+    .walk ha-icon { --mdc-icon-size: 18px; }
     header {
       display: flex; align-items: center; gap: 8px; padding: 12px 16px 4px; cursor: pointer;
     }
@@ -63,10 +71,16 @@
     departures: ["Departures to show", ""],
     lines: ["Only these lines", "e.g. S41 or U2. Empty: all lines."],
     destinations: ["Only these destinations", "Part of the name is enough, e.g. Pankow. Empty: all."],
+    ride_from: [
+      "Ride from (the previous card's sensor)",
+      "Shows the ride time from that station, on its lines, to this one.",
+    ],
     walk_minutes: [
       "Walk from the previous card (minutes)",
-      "Shown at the top, for changing trains: the walk from the previous card's arrival platform.",
+      "The change from where the previous train arrives to this card's platform.",
     ],
+    show_ride: ["Show ride time", ""],
+    show_walk: ["Show walk time", ""],
   };
 
   const esc = (value) =>
@@ -94,6 +108,7 @@
       this._config = {};
       this._timer = null;
       this._rows = [];
+      this._ride = null; // { key, time, result }
     }
 
     setConfig(config) {
@@ -111,7 +126,10 @@
       const changed = state !== this._state;
       this._hass = hass;
       this._state = state;
-      if (changed) this._render();
+      if (changed) {
+        this._updateRide();
+        this._render();
+      }
     }
 
     connectedCallback() {
@@ -153,22 +171,69 @@
           { name: "departures", selector: { number: { min: 1, max: 20, mode: "box" } } },
           { name: "lines", selector: { text: { multiple: true } } },
           { name: "destinations", selector: { text: { multiple: true } } },
+          { name: "ride_from", selector: { entity: { domain: "sensor", integration: "db_infoscreen" } } },
           { name: "walk_minutes", selector: { number: { min: 0, max: 60, mode: "box", unit_of_measurement: "min" } } },
+          {
+            type: "grid",
+            name: "",
+            schema: [
+              { name: "show_ride", selector: { boolean: {} } },
+              { name: "show_walk", selector: { boolean: {} } },
+            ],
+          },
         ],
         computeLabel: (field) => FORM_LABELS[field.name]?.[0],
         computeHelper: (field) => FORM_LABELS[field.name]?.[1] || undefined,
       };
     }
 
-    // The station as the departure dialog needs it.
-    _stop() {
-      const attrs = this._state?.attributes ?? {};
+    // The station as the departure dialog needs it, from a sensor's state.
+    _stop(state = this._state, title = this._config.title) {
+      const attrs = state?.attributes ?? {};
       const station = String(attrs.station ?? "");
       const first = (attrs.next_departures ?? [])[0];
       // HAFAS stop ids are numbers (BVG: 900...); IRIS stations are names.
       const network = first && !isIris(first) ? "BVG" : "DB";
-      const name = /^\d+$/.test(station) ? this._config.title || station : station;
+      const name = /^\d+$/.test(station) ? title || station : station;
       return { name, eva: station, network, colors: "berlin" };
+    }
+
+    // The ride from the previous card's station, on that sensor's lines, so an
+    // S-Bahn leg is timed S-Bahn to S-Bahn. Looked up now and then; the
+    // card renders without it until it arrives.
+    _updateRide() {
+      const config = this._config;
+      const from = config.ride_from && this._hass?.states[config.ride_from];
+      if (!from || !this._state || config.show_ride === false || !core()?.ride) return;
+      const lines = [...new Set((from.attributes?.next_departures ?? [])
+        .map((dep) => tidy(dep.train, dep.trainNumber)).filter(Boolean))];
+      const start = this._stop(from, "");
+      const end = this._stop();
+      const key = JSON.stringify([start.eva, end.eva, lines]);
+      if (this._ride && this._ride.key === key && Date.now() - this._ride.time < RIDE_REFRESH_MS) return;
+      this._ride = { key, time: Date.now(), result: this._ride?.key === key ? this._ride.result : null };
+      core().ride(
+        { eva: start.eva, name: start.name, network: start.network },
+        { eva: end.eva, name: end.name },
+        lines,
+      ).then((result) => {
+        if (this._ride?.key !== key) return;
+        this._ride.result = result;
+        this._render();
+      }).catch(() => {});
+    }
+
+    _linkRow() {
+      const config = this._config;
+      const parts = [];
+      const ride = this._ride?.result;
+      if (config.show_ride !== false && ride?.minutes != null) {
+        parts.push(`<ha-icon icon="mdi:train"></ha-icon>${esc(ride.minutes)} min ride`);
+      }
+      if (config.show_walk !== false && Number(config.walk_minutes) > 0) {
+        parts.push(`<ha-icon icon="mdi:walk"></ha-icon>${esc(config.walk_minutes)} min walk`);
+      }
+      return parts.length ? `<div class="walk">↓ ${parts.join(" · ")}</div>` : "";
     }
 
     _departures() {
@@ -244,9 +309,7 @@
       const attrs = this._state?.attributes ?? {};
       const title = config.title || attrs.station || attrs.friendly_name || config.entity;
       const icon = config.icon || attrs.icon || "mdi:train";
-      const walk = Number(config.walk_minutes) > 0
-        ? `<div class="walk"><ha-icon icon="mdi:walk"></ha-icon>↓ ${esc(config.walk_minutes)} min walk</div>`
-        : "";
+      const walk = this._linkRow();
       // Berlin S- and U-Bahn colours, as on BVG stops.
       const network = "BVG";
       let body;
@@ -273,7 +336,7 @@
   window.customCards.push({
     type: "spdbf-connection-card",
     name: "spdbf connection",
-    description: "Departures of a connection you use (db_infoscreen sensor), with an optional walk time from the previous card.",
+    description: "Departures of a connection you use (db_infoscreen sensor), with the ride and walk from the previous card.",
     preview: true,
     documentationURL: "https://github.com/Drakknar/ha-spdbf-nearby#connection-card",
   });
