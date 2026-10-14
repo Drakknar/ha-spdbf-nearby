@@ -129,6 +129,14 @@ There are **no automated tests** yet. What has been done for changes so far:
   - **`pip install home-assistant-frontend==<pinned>`**, because the `frontend` dependency needs it.
   - **Teardown errors:** the hass fixture's teardown raises `WinError 10022` in tests that use the HTTP/WebSocket client. That's an environment issue; the tests themselves pass.
 
+**0.3.0 frontend checks (2026-10-14):** both scripts were run under Node (VS Code's `Code.exe` with `ELECTRON_RUN_AS_NODE=1`) against a hand-made fake DOM and `hass`.
+- **Dialog:**
+  - **By line:** order S7, U2 Pankow, U2 Ruhleben, M4; 3 times per line; U2 colour; cancelled times struck through.
+  - **Map entity:** "Includes …", provisional rows and "Entity details".
+  - **Unreachable** board message, and a searched stop opening as its entity.
+- **Card:** nearby on focus, debounced search, Enter opens the first stop, errors are shown.
+  - **Stale answers:** a search still on its way is dropped when the field is cleared and the cached nearby list shows. That bug was found and fixed this way.
+
 ## Open items
 
 - **0.3.0 (2026-10-14), not yet tested in Home Assistant:** stop search card, full-board dialog, duplicate merging, outage handling and the public fallback. Needs the DBF image with `station-name-search.pl`.

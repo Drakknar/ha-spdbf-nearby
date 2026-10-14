@@ -594,6 +594,10 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
             except ServerUnreachable as err:
                 # No point trying the next backend on the same server.
                 return Board(error=str(err), unreachable=True)
+            except DbfError as err:
+                _LOGGER.debug("Departures for %s (%s) failed: %s", eva, hafas, err)
+                errors.append(str(err))
+                continue
             if departures:
                 return Board(
                     departures=departures[:keep],
@@ -612,15 +616,9 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
         params = {"mode": "json", "limit": str(rows)}
         if hafas:
             params["hafas"] = hafas
-        try:
-            payload, fallback = await self._request_json(
-                "GET", f"/{quote(eva)}", params=params
-            )
-        except ServerUnreachable:
-            raise
-        except DbfError as err:
-            _LOGGER.debug("Departures for %s (%s) failed: %s", eva, hafas, err)
-            return [], str(err), False
+        payload, fallback = await self._request_json(
+            "GET", f"/{quote(eva)}", params=params
+        )
         if not isinstance(payload, dict):
             return [], "unexpected response from spdbf", fallback
 

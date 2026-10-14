@@ -208,8 +208,8 @@
       this._render();
     }
 
-    async _call(params, label) {
-      if (!this._hass) return;
+    async _call(params, label, empty) {
+      if (!this._hass) return null;
       const request = ++this._request;
       const entry = this._config.entry_id ? { entry_id: this._config.entry_id } : {};
       try {
@@ -217,7 +217,7 @@
         if (request !== this._request || !this._open) return null;
         this._stops = result.stops;
         this._label = label;
-        this._message = result.stops.length ? "" : "No stops found.";
+        this._message = result.stops.length ? "" : empty;
         this._active = -1;
         this._render();
         return result.stops;
@@ -231,6 +231,7 @@
 
     async _loadNearby() {
       if (this._nearby && Date.now() - this._nearby.time < NEARBY_MAX_AGE_MS) {
+        this._request += 1; // drops a search still on its way
         this._stops = this._nearby.stops;
         this._label = "Near you";
         this._message = this._stops.length ? "" : "No stops nearby.";
@@ -242,17 +243,14 @@
       this._setMessage("Near you", "Finding stops near you…");
       this._position = await this._locate();
       if (request !== this._request || !this._open) return;
-      const stops = await this._call({ type: `${SOURCE}/nearby` }, "Near you");
-      if (stops) {
-        this._nearby = { time: Date.now(), stops };
-        if (!stops.length) this._setMessage("Near you", "No stops nearby.");
-      }
+      const stops = await this._call({ type: `${SOURCE}/nearby` }, "Near you", "No stops nearby.");
+      if (stops) this._nearby = { time: Date.now(), stops };
     }
 
     _search(query) {
       if (!this._open || query !== this._query) return;
       this._setMessage("Results", "Searching…");
-      this._call({ type: `${SOURCE}/search`, query }, "Results");
+      this._call({ type: `${SOURCE}/search`, query }, "Results", "No stops found.");
     }
 
     _pick(index) {
