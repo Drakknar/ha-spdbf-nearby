@@ -1,6 +1,6 @@
 // spdbf Nearby Stops: a dashboard card to find a stop by name (DB, BVG and
 // the other configured sources). Focusing the empty field lists the stops
-// near you; picking a stop opens its departures (spdbf-departures.js).
+// near you; picking a stop opens its departures (dbf-core.js).
 // Loaded on every page by the integration, so no dashboard resource is needed.
 // It appears in the card picker, and getConfigForm gives it Home Assistant's
 // own visual editor.
@@ -283,8 +283,8 @@
     _pick(index) {
       const stop = this._stops[index];
       if (!stop) return;
-      if (typeof window.spdbfShowStop === "function") {
-        window.spdbfShowStop(stop);
+      if (window.dbfCore) {
+        window.dbfCore.showStop(stop);
       } else if (stop.url) {
         window.open(stop.url, "_blank", "noopener");
       }

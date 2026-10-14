@@ -20,17 +20,22 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
   hacs.json, README.md              HACS metadata (min HA 2026.9.0) and user docs
   custom_components/spdbf_nearby/   <- this folder
     __init__.py         Serves www/ as static files, injects both scripts on every page
-                        (add_extra_js_url), registers the WebSocket commands, sets up the
-                        coordinator and the geo_location platform
-    coordinator.py      SpdbfCoordinator: follows the tracked entity, looks up stops, fetches departures,
-                        merges duplicate stops; also answers search, nearby and full-board requests
-    websocket_api.py    spdbf_nearby/search, /nearby and /board for the card and the dialog
+                        (add_extra_js_url), registers the WebSocket commands, creates the
+                        DbfClient and the coordinator, and the geo_location platform if map stops are on
+    dbf.py              Core: DbfClient talks to DBF (fast fail, public fallback, Repairs), reads
+                        boards, searches, caches full boards, fetches trips
+    stations.py         Core, no network: Stop/Board, tidy_line, DB + BVG linking, same-board
+                        merging, board combining, search ranking
+    coordinator.py      The map feature: follows the tracked entity, keeps nearby stops and their
+                        departures; with map stops off it only answers "nearby"
+    websocket_api.py    spdbf_nearby/search, /nearby, /board and /trip for the cards and the dialog
     geo_location.py     One SpdbfStop entity per stop; added and removed as the stop list changes
     config_flow.py      Setup and options flow
     const.py            Settings, defaults, FRONTEND_VERSION, thresholds
     www/
-      spdbf-departures.js       Departure dialog that replaces more-info for stop entities;
-                                window.spdbfShowStop(stop) opens it for any stop
+      dbf-core.js               Frontend core, window.dbfCore: tidyLine, lineKey, lineStyle (line
+                                colours), showStop (departure dialog), showTrip; also replaces
+                                more-info for stop entities (window.spdbfShowStop: old name)
       spdbf-stop-search-card.js custom:spdbf-stop-search-card, the stop search card
       marker-{train,bus,stop}.svg   Map marker pictures (entity_picture)
     dashboard_card.yaml Example map card and Markdown departures card
@@ -95,13 +100,32 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
 - **Entities:** `geo_location` entities, state = distance in km.
   - **No unique_id on purpose,** so stops passed while travelling never pile up in the entity registry. They also don't appear in `core.restore_state`.
   - **Recorder (since 0.2.3):** `_unrecorded_attributes` keeps `departures`, `next_departure`, `departures_via`, `departures_error`, `distance_km`, `url`, (since 0.3.0) `merged_stops` and `fallback`, and (since 0.4.0) `networks` out of history. Before that, every refresh wrote a new attributes row per stop.
-- **Departure dialog (`www/spdbf-departures.js`):**
+- **Core split (since 0.5.0):** the owner wants one core for everything shown from DBF, and only what each feature needs on top. The map (nearby stops) and the dashboard hub (picked connections, search) stay separate features.
+  - **Python:** `dbf.py` and `stations.py` are the core; `coordinator.py` and `geo_location.py` are the map feature.
+  - **Frontend:** `www/dbf-core.js` is the core for the search card, and for the connection card planned next. The old `spdbf-departures.js` became `dbf-core.js`.
+  - **Optional map:** option `map_stops` (default on). Off means no stop entities and no polling (`update_interval` None). `nearby` then does a lookup around the card's position or the tracked person.
+- **Line names (`stations.tidy_line`, `dbfCore.tidyLine`, since 0.5.0):**
+  - **What DB sends:** IRIS writes `S S41`, `S 5`, `OE RB10`, `STR M10`, or `ICE` with the number apart. BVG writes `S41`, `RB10`, `M10`.
+  - **Rules:** a second word that already contains letters and digits is taken as is. `S/U/RE/RB/IRE/MEX/RS` + number are joined. Long-distance trains keep the space (`ICE 1107`).
+  - **Bug fixed:** 0.4.x compared raw names, so the DB + BVG merge kept DB's `S S3` next to BVG's `S3`, and those lines got no colour. Checked live 2026-10-14: the merged Alexanderplatz board now has no S-Bahn train twice.
+- **Trips (since 0.5.0, `spdbf_nearby/trip`, DBF only; Transitous is dropped by the owner's choice):** each departure carries `trip`.
+  - **BVG/HAFAS:** `trip` is `{id, hafas}`, and the trip is `GET /z/<id>.json?hafas=<service>` (`journey.route`). The id needs the DBF patch `hafas-trip-id.pl`; without it, BVG departures have no `trip`.
+  - **DB/IRIS:** `trip` is `{train: "<type> <number>", station: eva, scheduled}`, and the trip is `GET /z/<train>/<eva>.json` (`departure`).
+    - **Stop names** (`route_pre`/`route_post`) come from IRIS and are this train's.
+    - **Times** (`route_*_diff`) come from a lookup by train number, which can return another train: an S7 at Westkreuz once got the times of a train near Stuttgart. They are used only when their stop names equal IRIS's; otherwise `times: false` and the dialog shows names only.
+  - **Result:** `{line, direction, stops: [{name, eva, arrival, departure, *_delay, platform, cancelled, current?}], times, messages, fallback}`. HAFAS times are ISO with offset, IRIS times are naive local ISO, and the IRIS station itself is `HH:MM`. The dialog shows `HH:MM` from either.
+  - **Checked live 2026-10-14:** an S42 from Westkreuz returned its ring stops with times.
+- **Departure dialog (`www/dbf-core.js`):**
   - It listens for `hass-more-info` in the capture phase on `window`, which runs before Home Assistant's own handler on `<home-assistant>`. For a stop entity it stops the event and opens its own dialog; every other entity keeps the normal dialog.
   - The "Entity details" button re-fires `hass-more-info` with `spdbfDetails: true`, which the listener lets through.
   - **Full board (since 0.3.0):** on open the dialog calls `spdbf_nearby/board` and reloads it every 30 s. Until the first answer it shows the entity's own departures, if it has any.
   - **Views:** "By line" (default) groups by line and destination, with the next 3 departures each, ordered S-Bahn, U-Bahn, then the rest. DBF's JSON has no product type, so trams and buses can't be told apart. "By time" is the old flat list. The choice is kept in `localStorage` (`spdbf-departures-view`).
   - **Line colours:** for BVG and VBB stops, S- and U-Bahn chips use BVG's line colours; everything else uses the theme's primary colour.
-  - **`window.spdbfShowStop(stop)`** opens the dialog for a stop from the card. If that stop is also a map entity (same eva and network), it opens as the entity.
+  - **`dbfCore.showStop(stop)`** (formerly `window.spdbfShowStop`, still defined) opens the dialog for a stop. If that stop is also a map entity (same eva and network), it opens as the entity. `dbfCore.showTrip(stop, dep)` opens it on a departure's trip.
+  - **Trip view (since 0.5.0):** tapping a departure (a row in either view; in "By line", the next departure of that line) opens its trip.
+    - **Shown:** the trip's stops with times and delays, and platforms. Stops before the station are dimmed; the station itself is bold, matched by eva, the `current` flag or name.
+    - **Also:** HIM messages (e.g. lifts out of order), and a note when DBF has only stop names.
+    - **Back:** "← Departures" returns to the board.
 - **Stop search card (`www/spdbf-stop-search-card.js`, since 0.3.0):** `custom:spdbf-stop-search-card`. It is loaded with `add_extra_js_url` like the dialog, so no Lovelace resource is needed.
   - **Card picker:** listed through `window.customCards`, with `preview: true` and a `documentationURL`.
   - **Visual editor (since 0.3.1):** `static getConfigForm()` returns an `ha-form` schema, which HA's card editor renders natively; no editor element of our own. Checked 2026-10-14 in frontend 20260930.3: the card editor resolves the custom element class and calls its `getConfigForm`, as for built-in cards.
@@ -162,7 +186,7 @@ There are **no automated tests** yet. What has been done for changes so far:
   - **Check:** the card's nearby list and search, the dialog's grouping at Alexanderplatz, and merged markers on the map.
   - **Companion app:** whether the browser location works in the companion app's WebView. If it doesn't, the card falls back to the tracked person.
 
-- **Mobile tap shows entity details (reported 2026-10-10, unresolved):** in the Android companion app, tapping a stop on the map opened Home Assistant's entity dialog instead of the departures. The installed files matched the repository. Most likely cause: the app's cached frontend never loaded `spdbf-departures.js`. First step: reset the app's frontend cache and retry. If it persists, check in the app's WebView whether `window.__spdbfDepartures` is set and the console shows "spdbf Nearby Stops: departure list active".
+- **Mobile tap shows entity details (reported 2026-10-10, unresolved):** in the Android companion app, tapping a stop on the map opened Home Assistant's entity dialog instead of the departures. The installed files matched the repository. Most likely cause: the app's cached frontend never loaded the departure dialog script (now `dbf-core.js`). First step: reset the app's frontend cache and retry. If it persists, check in the app's WebView whether `window.dbfCore` is set and the console shows "spdbf Nearby Stops: frontend core active".
 - **Idea, discussed and not wanted for now:** loading stops for the area the map is showing, instead of around the person. That would mean hooking into `ha-map`'s private engine, which can break with any HA update. It would use temporary markers rather than entities, so one viewer's panning doesn't move everyone's stops.
 - **Possible improvements:** pytest tests with a fake DBF server (as in `ha-audiocpp`), diagnostics, translations other than English.
 
@@ -179,7 +203,7 @@ The author's Home Assistant installs this integration through HACS (custom repos
 - **Compatibility fixes:** the review prompt tells Claude to bump the patch version whenever it changes integration code. Merging its pull request therefore publishes the fix.
 - **Doc-only changes** don't need a release. HACS won't offer them, and nothing changes in Home Assistant.
 - **When HACS updates:** it refreshes repository data only every few hours. "Update information" on the repository in HACS checks at once.
-- **Copying by hand:** the installed `www/` had a `spdbf-departures.js.gz` next to the script (found 2026-10-14, presumably from HACS). When copying the folder by hand, delete any such `.gz`, or the old script may be served.
+- **Copying by hand:** the installed `www/` had an old `.js.gz` next to the dialog script (found 2026-10-14, presumably from HACS). When copying the folder by hand, delete any such `.gz`, or the old script may be served.
 
 ## Upstream watch
 

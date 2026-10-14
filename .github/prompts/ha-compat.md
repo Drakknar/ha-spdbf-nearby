@@ -55,7 +55,7 @@ Status:
   If a fix is non-trivial, add a small pytest with `pytest-homeassistant-custom-component` that covers it, the way CLAUDE.md suggests (a fake DBF server, as in ha-audiocpp).
 - **Python side:** `geo_location` entities, `DataUpdateCoordinator`, state-change tracking, config and options flows, Repairs issues, `_unrecorded_attributes`, static paths and `add_extra_js_url` in the `http` and `frontend` integrations, and WebSocket commands (`websocket_api.websocket_command`, `async_response`, `async_register_command`, `ActiveConnection.send_result`/`send_error`, `ConfigEntryState`, `entry.reason`).
 - **Frontend side:** both scripts in `www/` depend on Home Assistant frontend behaviour. CLAUDE.md "How it works" and "Findings" list it.
-  - **`spdbf-departures.js`:**
+  - **`dbf-core.js`** (the frontend core, `window.dbfCore`):
     - `hass-more-info` caught in the capture phase on `window`;
     - the more-info dialog;
     - `ha-map`, `ha-entity-marker` and the map engine;
@@ -68,7 +68,8 @@ Status:
     - `ha-card` and `ha-icon`.
 
   For a Home Assistant release, find the frontend version it ships and diff https://github.com/home-assistant/frontend between the two frontend tags for those files. If anything in `www/` changes, bump `FRONTEND_VERSION` in `const.py`.
-- **DBF:** the coordinator calls `POST /_geolocation` (`lat`, `lon`, `hafas`, or `q` for the name search) and `GET /<eva>?mode=json&limit=…[&hafas=…]`, and reads the fields used in `coordinator.py`.
+- **DBF:** `dbf.py` calls `POST /_geolocation` (`lat`, `lon`, `hafas`, or `q` for the name search), `GET /<eva>?mode=json&limit=…[&hafas=…]`, and for trips `GET /z/<tripId>.json?hafas=…` and `GET /z/<type> <number>/<eva>.json`. It reads the fields used in `dbf.py`.
+  - **Trip ids:** `tripId` in HAFAS departures comes from the patched build (`hafas-trip-id.pl`).
   - **Name search:** `q=` exists only in the owner's patched build (`station-name-search.pl`); upstream answers it with an error.
   - **Public fallback:** the optional fallback (`https://dbf.finalrewind.org`) runs upstream DBF, so upstream's response format matters there directly.
   - For a DBF change, diff `lib/` between the two commits and check those requests and fields.

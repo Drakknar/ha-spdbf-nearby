@@ -1,15 +1,18 @@
-// spdbf Nearby Stops: opening a stop (map marker, entity search, the stop
-// search card, ...) shows its departures instead of the generic entity
-// dialog. Every other entity keeps Home Assistant's own dialog. Loaded on
-// every page by the integration.
+// spdbf frontend core, shared by everything that shows DBF data: line names
+// and colours, the departure dialog and its trip view. Loaded on every page
+// by the integration.
 //
-// The dialog loads the stop's full board from the integration
-// (spdbf_nearby/board), so busy stations show every line, not only the few
-// departures kept on the map entity. window.spdbfShowStop(stop) opens it for
-// any stop, which is what the stop search card uses.
+//   window.dbfCore.tidyLine(train, number)  "S S41" -> "S41", "OE RB10" -> "RB10"
+//   window.dbfCore.lineStyle(line, network) {background, color} or null
+//   window.dbfCore.showStop(stop)           departure dialog for a stop
+//   window.dbfCore.showTrip(stop, dep)      the dialog, opened on a departure's trip
+//
+// Opening a map stop (marker, entity search) shows the dialog instead of the
+// generic entity dialog; every other entity keeps Home Assistant's own. The
+// dialog loads the stop's full board (spdbf_nearby/board), and tapping a
+// departure shows its trip (spdbf_nearby/trip), from DBF only.
 (() => {
-  if (window.__spdbfDepartures) return;
-  window.__spdbfDepartures = true;
+  if (window.dbfCore) return;
 
   const SOURCE = "spdbf_nearby";
   const TICK_MS = 1000;
@@ -29,6 +32,8 @@
   };
   const DARK_TEXT = new Set(["U4"]);
   const COLORED_NETWORKS = new Set(["BVG", "VBB"]);
+  // Line types written together with their number: "S 5" is S5, "RE 1" RE1.
+  const JOINED_TYPES = new Set(["S", "U", "RE", "RB", "IRE", "MEX", "RS"]);
 
   const STYLE = `
     :host { position: fixed; inset: 0; z-index: 1000; }
@@ -91,6 +96,15 @@
     .late, .cancelled .min { color: var(--error-color, #db4437); }
     li.cancelled .dest div, s { text-decoration: line-through; opacity: 0.7; }
     .empty { padding: 16px 24px; color: var(--secondary-text-color, #727272); }
+    li.clickable { cursor: pointer; }
+    li.clickable:hover { background: var(--secondary-background-color, rgba(0, 0, 0, 0.04)); }
+    .trip-head { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; min-width: 0; }
+    .trip-head .dest { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    ul.trip li { grid-template-columns: 52px 1fr auto; padding: 8px 16px; }
+    ul.trip li.past { opacity: 0.55; }
+    ul.trip li.current { font-weight: 600; }
+    ul.trip .t { font-variant-numeric: tabular-nums; }
+    .note { padding: 0 24px 8px; color: var(--secondary-text-color, #727272); font-size: 12px; }
     footer { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 16px 16px; }
     .btn {
       padding: 8px 12px; border: none; border-radius: 20px; background: none; cursor: pointer;
@@ -124,12 +138,15 @@
   let lastRender = 0;
   let timer = null;
   let session = 0; // ignores answers that arrive after the dialog changed
+  let shown = []; // departures on screen, for tapping one
+  let trip = null; // { dep, data, error } while a trip is open
 
   function close() {
     clearInterval(timer);
     document.removeEventListener("keydown", onKey, true);
     host?.remove();
-    host = stop = entityId = board = boardError = lastState = null;
+    host = stop = entityId = board = boardError = lastState = trip = null;
+    shown = [];
     boardTime = 0;
     loading = false;
     session += 1;
@@ -168,15 +185,31 @@
     }
   }
 
-  const lineKey = (line) => String(line ?? "").replace(/\s+/g, "");
+  const lineKey = (line) => String(line ?? "").replace(/\s+/g, "").toUpperCase();
+
+  // Same rules as stations.tidy_line in the integration.
+  function tidyLine(train, number) {
+    const parts = String(train ?? "").trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return String(number ?? "");
+    if (parts.length === 1) {
+      return number && /^[A-Za-z]+$/.test(parts[0]) ? `${parts[0]} ${number}` : parts[0];
+    }
+    const [kind, line] = parts;
+    if (/^[A-Za-z]+\d+[A-Za-z]?$/.test(line)) return line;
+    if (JOINED_TYPES.has(kind.toUpperCase()) && /^\d+$/.test(line)) return kind + line;
+    return parts.join(" ");
+  }
+
+  function lineStyle(line, network) {
+    const key = lineKey(line);
+    const color = COLORED_NETWORKS.has(network) ? LINE_COLORS[key] : null;
+    return color ? { background: color, color: DARK_TEXT.has(key) ? "#212121" : "#fff" } : null;
+  }
 
   function lineChip(line) {
-    const key = lineKey(line);
-    const color = COLORED_NETWORKS.has(stop.network) ? LINE_COLORS[key] : null;
-    const style = color
-      ? ` style="background:${color};color:${DARK_TEXT.has(key) ? "#212121" : "#fff"}"`
-      : "";
-    return `<span class="line"${style}>${esc(line)}</span>`;
+    const style = lineStyle(line, stop.network);
+    const css = style ? ` style="background:${style.background};color:${style.color}"` : "";
+    return `<span class="line"${css}>${esc(line)}</span>`;
   }
 
   // S-Bahn, then U-Bahn, then everything else; lines in natural order.
@@ -199,8 +232,9 @@
       ? `<div class="min">cancelled</div><small>${esc(dep.scheduled)}</small>`
       : `<div class="min">${minutes === 0 ? "now" : `${minutes} min`}</div><small>${esc(dep.scheduled)}${delay}</small>`;
     const platform = dep.platform ? `<small>Platform ${esc(dep.platform)}</small>` : "";
+    const classes = [dep.cancelled && "cancelled", dep.trip && "clickable"].filter(Boolean).join(" ");
     return `
-      <li class="${dep.cancelled ? "cancelled" : ""}">
+      <li class="${classes}" data-dep="${shown.indexOf(dep)}">
         ${lineChip(dep.line)}
         <div class="dest"><div>${esc(dep.destination)}</div>${platform}</div>
         <div class="when">${when}</div>
@@ -220,8 +254,9 @@
       ? `<small>Platform ${platforms.slice(0, 2).map(esc).join(", ")}</small>`
       : "";
     const delayed = group.deps.slice(0, PER_LINE).some((dep) => dep.delay && !dep.cancelled);
+    // Tapping the row opens the next departure's trip.
     return `
-      <li>
+      <li class="${first.trip ? "clickable" : ""}" data-dep="${shown.indexOf(first)}">
         ${lineChip(first.line)}
         <div class="dest"><div>${esc(first.destination)}</div>${platform}</div>
         <div class="when"><div class="times">${times.join("")}</div><small>min${delayed ? ' · <span class="late">delayed</span>' : ""}</small></div>
@@ -279,8 +314,11 @@
       error = state.attributes.departures_error;
     }
 
+    shown = deps ?? [];
     let body;
-    if (!deps) {
+    if (trip) {
+      body = tripBody(info);
+    } else if (!deps) {
       body = boardError
         ? `<div class="empty">Couldn't load departures: ${esc(boardError)}</div>`
         : `<div class="empty">Loading departures…</div>`;
@@ -325,16 +363,66 @@
         </div>
         <button class="icon-btn" data-action="close" aria-label="Close">×</button>
       </header>
-      <div class="views" role="group" aria-label="Sort departures">
+      ${trip ? "" : `<div class="views" role="group" aria-label="Sort departures">
         <button data-view="line" ${pressed("line")}>By line</button>
         <button data-view="time" ${pressed("time")}>By time</button>
-      </div>
-      ${status}
+      </div>`}
+      ${trip ? "" : status}
       ${body}
       <footer>
         ${entityId ? `<button class="btn" data-action="details">Entity details</button>` : ""}
         ${link}
       </footer>`;
+  }
+
+  const hhmm = (value) => (!value ? "" : value.length === 5 ? value : String(value).slice(11, 16));
+
+  function tripBody(info) {
+    const dep = trip.dep;
+    const head = `
+      <div class="trip-head">
+        <button class="btn" data-action="back">← Departures</button>
+        ${lineChip(dep.line)}<span class="dest">→ ${esc(dep.destination)}</span>
+      </div>`;
+    if (trip.error) return `${head}<div class="empty">Couldn't load this trip: ${esc(trip.error)}</div>`;
+    if (!trip.data) return `${head}<div class="empty">Loading trip…</div>`;
+    const data = trip.data;
+    // The station the trip was opened from, in any of its networks.
+    const evas = new Set([String(info.eva), ...(info.linked ?? []).map((l) => String(l.eva))]);
+    let current = data.stops.findIndex((s) => s.current || evas.has(String(s.eva)));
+    if (current < 0) current = data.stops.findIndex((s) => s.name === info.name);
+    const rows = data.stops.map((s, index) => {
+      const time = hhmm(s.departure || s.arrival);
+      const delay = s.departure_delay ?? s.arrival_delay;
+      const late = delay ? `<small class="late"> +${esc(delay)}</small>` : "";
+      const classes = [index < current && "past", index === current && "current",
+        s.cancelled && "cancelled"].filter(Boolean).join(" ");
+      const platform = s.platform ? `<small>Platform ${esc(s.platform)}</small>` : "";
+      return `
+        <li class="${classes}">
+          <span class="t">${esc(time)}${late}</span>
+          <div class="dest"><div>${esc(s.name ?? info.name)}</div></div>
+          <div class="when">${platform}</div>
+        </li>`;
+    });
+    const note = data.times ? "" : `<div class="note">DBF has no times for this train, only its stops.</div>`;
+    const messages = (data.messages ?? []).map((m) => `<div class="note">${esc(m)}</div>`).join("");
+    return `${head}${note}${messages}<ul class="trip">${rows.join("")}</ul>`;
+  }
+
+  async function openTrip(dep) {
+    const ha = hass();
+    if (!ha || !dep?.trip) return;
+    const mine = session;
+    trip = { dep, data: null, error: null };
+    render(true);
+    try {
+      const data = await ha.callWS({ type: `${SOURCE}/trip`, trip: dep.trip });
+      if (mine === session && trip?.dep === dep) trip.data = data;
+    } catch (err) {
+      if (mine === session && trip?.dep === dep) trip.error = err?.message || String(err);
+    }
+    if (mine === session) render(true);
   }
 
   function show(info, id = null) {
@@ -355,6 +443,16 @@
         return;
       }
       const action = ev.target.closest("[data-action]")?.dataset.action;
+      if (action === "back") {
+        trip = null;
+        render(true);
+        return;
+      }
+      const row = !action && !trip && ev.target.closest("[data-dep]");
+      if (row) {
+        openTrip(shown[Number(row.dataset.dep)]);
+        return;
+      }
       if (action === "close") close();
       if (action === "details") {
         const target = entityId;
@@ -393,14 +491,28 @@
 
   // Opens the dialog for any stop. A stop that is also on the map opens as
   // that entity, so "Entity details" works and the distance stays live.
-  window.spdbfShowStop = (info) => {
+  function showStop(info) {
     const states = hass()?.states ?? {};
     const match = Object.values(states).find((state) =>
       isStop(state) && String(state.attributes.eva) === String(info.eva)
       && state.attributes.network === info.network);
     if (match) show(fromEntity(match), match.entity_id);
     else show(info);
+  }
+
+  window.dbfCore = {
+    version: 1,
+    tidyLine,
+    lineKey,
+    lineStyle,
+    showStop,
+    showTrip(info, dep) {
+      showStop(info);
+      openTrip(dep);
+    },
   };
+  // Name used before 0.5.0.
+  window.spdbfShowStop = showStop;
 
   // Capture on window runs before Home Assistant's own handler, which
   // listens on the <home-assistant> element.
@@ -413,5 +525,5 @@
     show(fromEntity(state), id);
   }, true);
 
-  console.info("spdbf Nearby Stops: departure list active");
+  console.info("spdbf Nearby Stops: frontend core active");
 })();

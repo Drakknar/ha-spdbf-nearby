@@ -6,6 +6,7 @@ Show public transport stops near you on the Home Assistant map, with live depart
 - **Train or bus at a glance.** Map markers show a train for DB stations and S-/U-Bahn stops, a bus for BVG stops, and a generic stop icon for other networks.
 - **Tap a stop for its departures.** The dialog loads the stop's full board, grouped by line and destination ("U2 → Pankow: 2 · 7 · 12 min"), or sorted by time if you prefer. You get platforms, delays and cancellations, plus a link to the DBF board. This works on the Map panel, on any map card, from entity search and from the stop search card. It follows your theme, including light/dark mode.
 - **Search any stop.** A dashboard card finds DB and BVG stops by name. Tap the empty field to list the stops near you.
+- **Follow a trip.** Tap a departure to see its stops and times, with delays and disruption notices, from DBF.
 - **One marker per station.** BVG lists some stations several times (Alexanderplatz has a stop for each exit and bus bay, all with the same board). Stops with identical departures are merged into one.
 - **DB and BVG together.** A DB station and the BVG S-/U-Bahn stop of the same station, such as Berlin Savignyplatz and S Savignyplatz, are one marker. It shows every BVG line plus the DB lines BVG doesn't list, such as regional and long-distance trains.
 - **DB + BVG by default.** Any HAFAS network that DBF supports can be added.
@@ -48,6 +49,7 @@ After installing or updating, reload the Home Assistant page or companion app on
 | Maximum number of stops | 12 | The nearest stops are kept. |
 | Departures per stop | 5 | Departures kept on each map stop (for `next_departure` and Markdown cards). The dialog always loads the full board. Set to 0 to show stops only. |
 | Merge duplicate stops | on | Show one stop when nearby stops have exactly the same departures. Needs departures turned on. |
+| Show nearby stops on the map | on | Off: no stop entities and no polling. The search card, departures and trips still work; "near you" uses the device's location or the followed person's. |
 | Merge DB and BVG stations | on | Show a DB station and the BVG S-/U-Bahn stop of the same name, at most 300 m apart, as one stop. Bus and tram stops stay separate. |
 | Use a public DBF instance while yours is unreachable | off | See [When your DBF server is down](#when-your-dbf-server-is-down). |
 | Public DBF instance | `https://dbf.finalrewind.org` | The instance used for that. |
@@ -93,6 +95,15 @@ Each stop is a `geo_location` entity with these attributes:
 | `networks` | For a merged DB + BVG station: the networks its departures come from, e.g. `["BVG", "DB"]` |
 | `departures_via` | The source the departures came from, when DBF's DB source was empty and the integration used its fallback (ÖBB) |
 | `departures_error` | Why no departures could be fetched, if no source had any |
+
+## Trips
+
+Tapping a departure in the dialog shows its trip: every stop with its time, delays and platform, and disruption notices. The station you opened it from is highlighted, and earlier stops are dimmed.
+
+- **BVG and other HAFAS networks:** needs the patched DBF image (`hafas-trip-id`).
+- **DB trains:** the stops always show. Times show when DBF can match them to the train for sure; otherwise the dialog lists the stops only.
+
+Other cards can use the same dialog, trip view and line colours through `window.dbfCore` (see CLAUDE.md).
 
 ## When your DBF server is down
 
