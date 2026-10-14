@@ -55,6 +55,17 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
   - **How:** on each stop lookup the coordinator fetches departures for up to 2 × max stops candidates and groups stops of the same source whose departure lists (line, destination, scheduled time; at least 2 rows) are identical.
   - **Which stop is kept:** each group keeps its shortest name, usually the station itself. The others go into `merged_stops`, and the groups are capped at max stops.
   - **When:** only at lookup time (move ≥ 100 m or 15 min), so markers don't flicker between refreshes. With departures set to 0 nothing is merged.
+- **Merging DB and BVG stations (since 0.4.0, option `merge_networks`, default on):** a DB station and the BVG rail stop of the same station are one stop. Boards can't be compared here: DB (IRIS) has regional and long-distance trains, BVG has U-Bahn, trams and buses, and both have the S-Bahn.
+  - **Matching** (`_link_networks`, `_station_names`): the BVG stop's name must start with a rail prefix (`S `, `U `, `S+U `), and the two must be at most 300 m apart.
+    - **Name normalisation:** lower case; brackets dropped (`(Berlin)`, `(S)`, `[Bus]`); the rail prefix dropped; `straße`/`str.` → `str`; `Hbf` → `hauptbahnhof`; `Bhf` dropped.
+    - **City prefix:** DB names may also match without their first word, the town ("Berlin Savignyplatz" → "savignyplatz").
+    - **Effect:** bus and tram stops of the same name stay separate.
+  - **Checked against live DBF data (2026-10-14):** Savignyplatz, Alexanderplatz (both DB entries), Hauptbahnhof (`S+U Berlin Hauptbahnhof` ↔ `Berlin Hbf`, `Berlin Hbf (S-Bahn)`), Friedrichstraße, Brandenburger Tor, Zoologischer Garten, Spandau (`Berlin-Spandau`), Ostkreuz, Rummelsburg, Südkreuz, Potsdamer Platz, Gesundbrunnen (`Berlin Gesundbrunnen(S)`) and Humboldthain all matched. No bus or tram stop did.
+  - **The kept stop:** the BVG stop stays, with its key, name and link. The DB stations go into `linked` and `merged_stops`, and `networks` becomes e.g. `["BVG", "DB"]`.
+  - **Departures** (`_combine_boards`): the BVG board as is, plus the DB rows whose line (spaces ignored: `S 7` = `S7`) isn't on it. Taking each line from one board avoids showing an S-Bahn train twice without matching trips.
+    - **Applies to:** the entity's departures and the dialog's `board` command for that stop.
+    - **While on the public fallback:** only the own board is fetched.
+  - **When:** it runs at lookup time after the same-board merge. Unlike that one, it also works with departures set to 0.
 - **Stop search (since 0.3.0):** `POST <server>/_geolocation` with `q=<name>` and `hafas=<service>`, once per HAFAS source like the coordinate lookup. This needs the `station-name-search.pl` patch of `Drakknar/db-fakedisplay-patched`. Upstream answers `{"error": "Invalid lon/lat received"}`, which the coordinator turns into a "use the patched image" message. Upstream's own name search only renders HTML, and its JSON mode returns just an error for ambiguous names.
 - **Your server down (since 0.3.0):** all requests go through `_request_json`.
   - **Fast fail:** a connection error, a timeout (5 s to connect, 20 s in total) or a gateway status (502/503/504) marks the server down. Any other HTTP error comes from DBF itself and doesn't count.
@@ -71,14 +82,14 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
   - **Search:** never uses the fallback.
   - **Marking:** boards from the fallback carry `fallback: true`, which becomes an entity attribute and is part of the WebSocket answer. Their links point to the fallback.
 - **WebSocket commands (`websocket_api.py`):**
-  - **`search`** `{query}` and **`nearby`** `{latitude?, longitude?}` return `stops` with name, eva, network, coordinates, `distance_km`, `entity_picture`, `url` and `merged_stops`.
+  - **`search`** `{query}` and **`nearby`** `{latitude?, longitude?}` return `stops` with name, eva, network, coordinates, `distance_km`, `entity_picture`, `url`, `merged_stops` and `networks`.
   - **`nearby` without a position,** or within 100 m of the tracked entity, returns the coordinator's current (merged) stops. Elsewhere it does a fresh, unmerged lookup.
   - **`board`** `{eva, network}` returns up to 80 departures (150 rows asked from DBF), cached for 20 s per stop (not while unreachable). It also returns `fallback` and `server_unreachable`. `network` must be a configured source.
   - **Errors:** `server_unreachable`, `dbf_error`, `not_ready`, `not_found`, `invalid_network`.
   - **Which entry:** each command takes an optional `entry_id`. By default it uses the entry whose tracked person belongs to the logged-in user, else the first loaded entry.
 - **Entities:** `geo_location` entities, state = distance in km.
   - **No unique_id on purpose,** so stops passed while travelling never pile up in the entity registry. They also don't appear in `core.restore_state`.
-  - **Recorder (since 0.2.3):** `_unrecorded_attributes` keeps `departures`, `next_departure`, `departures_via`, `departures_error`, `distance_km`, `url` and (since 0.3.0) `merged_stops` out of history. Before that, every refresh wrote a new attributes row per stop.
+  - **Recorder (since 0.2.3):** `_unrecorded_attributes` keeps `departures`, `next_departure`, `departures_via`, `departures_error`, `distance_km`, `url`, (since 0.3.0) `merged_stops` and `fallback`, and (since 0.4.0) `networks` out of history. Before that, every refresh wrote a new attributes row per stop.
 - **Departure dialog (`www/spdbf-departures.js`):**
   - It listens for `hass-more-info` in the capture phase on `window`, which runs before Home Assistant's own handler on `<home-assistant>`. For a stop entity it stops the event and opens its own dialog; every other entity keeps the normal dialog.
   - The "Entity details" button re-fires `hass-more-info` with `spdbfDetails: true`, which the listener lets through.

@@ -248,6 +248,7 @@
       name: attrs.friendly_name ?? stop.name,
       distance_km: attrs.distance_km,
       merged_stops: attrs.merged_stops ?? [],
+      networks: attrs.networks,
     };
   }
 
@@ -315,7 +316,7 @@
         ${info.entity_picture ? `<img src="${esc(info.entity_picture)}" alt="">` : ""}
         <div>
           <h2 id="spdbf-title">${esc(info.name)}</h2>
-          <div class="sub">${esc(info.network)}${distance}${via}</div>
+          <div class="sub">${esc(info.networks?.length > 1 ? info.networks.join(" + ") : info.network)}${distance}${via}</div>
           ${merged}
         </div>
         <button class="icon-btn" data-action="close" aria-label="Close">×</button>
@@ -377,6 +378,7 @@
       distance_km: attrs.distance_km,
       url: attrs.url,
       merged_stops: attrs.merged_stops ?? [],
+      networks: attrs.networks,
     };
   }
 

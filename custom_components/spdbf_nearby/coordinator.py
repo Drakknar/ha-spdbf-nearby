@@ -7,6 +7,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, tzinfo
 import logging
+import re
 from typing import Any
 from urllib.parse import quote
 
@@ -38,6 +39,7 @@ from .const import (
     CONF_FALLBACK_URL,
     CONF_MAX_STOPS,
     CONF_MERGE_DUPLICATES,
+    CONF_MERGE_NETWORKS,
     CONF_PUBLIC_URL,
     CONF_RADIUS,
     CONF_SCAN_INTERVAL,
@@ -49,6 +51,7 @@ from .const import (
     DEFAULT_FALLBACK,
     DEFAULT_FALLBACK_URL,
     DEFAULT_MERGE_DUPLICATES,
+    DEFAULT_MERGE_NETWORKS,
     DOMAIN,
     FALLBACK_MAX_REQUESTS,
     FALLBACK_STOPS,
@@ -60,6 +63,7 @@ from .const import (
     MAX_PARALLEL_REQUESTS,
     MERGE_CANDIDATE_FACTOR,
     MERGE_MIN_DEPARTURES,
+    MERGE_NETWORK_MAX_METERS,
     MIN_MOVE_METERS,
     PRIMARY_RETRY_AFTER,
     RAIL_NAME_PREFIXES,
@@ -112,13 +116,22 @@ class Stop:
     latitude: float
     longitude: float
     board: Board = field(default_factory=Board)
-    # Names of nearby stops with the same departure board, merged into this one.
+    # Names of nearby stops merged into this one: the same board, or the same
+    # station in another network.
     merged: list[str] = field(default_factory=list)
+    # The same station in other networks (DB for a BVG station). Their boards
+    # add the lines this stop's own board doesn't have.
+    linked: list[Stop] = field(default_factory=list)
 
     @property
     def key(self) -> str:
         """Return a key that is unique across sources."""
         return f"{self.source}_{self.eva}"
+
+    @property
+    def networks(self) -> list[str]:
+        """Return the networks whose departures this stop shows."""
+        return list(dict.fromkeys([self.source, *(s.source for s in self.linked)]))
 
     @property
     def kind(self) -> str:
@@ -179,6 +192,9 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
         self._departures = int(self.config[CONF_DEPARTURES])
         self._merge = bool(
             self.config.get(CONF_MERGE_DUPLICATES, DEFAULT_MERGE_DUPLICATES)
+        )
+        self._merge_networks = bool(
+            self.config.get(CONF_MERGE_NETWORKS, DEFAULT_MERGE_NETWORKS)
         )
         self._semaphore = asyncio.Semaphore(MAX_PARALLEL_REQUESTS)
         self._iris_tz: tzinfo | None = None
@@ -280,8 +296,7 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
                     # soon as your server is back.
                     self._stops = {s.key: s for s in candidates[: self._max_stops]}
                 else:
-                    self._stops = await self._pick_stops(candidates)
-                    fresh = self._merge and bool(self._departures)
+                    self._stops, fresh = await self._pick_stops(candidates)
                     self._lookup_pos = self.position
                     self._lookup_time = dt_util.utcnow()
 
@@ -491,33 +506,51 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
         in_range.sort(key=lambda item: item[0])
         return [stop for _, stop in in_range], via_fallback
 
-    async def _pick_stops(self, candidates: list[Stop]) -> dict[str, Stop]:
-        """Keep the nearest stops, merging stops that show the same board.
+    async def _pick_stops(self, candidates: list[Stop]) -> tuple[dict[str, Stop], bool]:
+        """Keep the nearest stops, merging stops that are one station.
 
-        BVG lists one station several times (S+U Alexanderplatz Bhf, .../
-        Dircksenstr., .../Gontardstr., ...), and their boards are identical.
-        Only exact duplicates are merged: similar names are no safe guide,
-        since a tram stop with the same name can have a board of its own.
+        Returns the stops, and whether their departures were just fetched.
+
+        - **Same network, same board:** BVG lists one station several times
+          (S+U Alexanderplatz Bhf, .../Dircksenstr., .../Gontardstr., ...),
+          and their boards are identical. Only exact duplicates are merged:
+          similar names are no safe guide, since a tram stop with the same
+          name can have a board of its own.
+        - **DB and BVG:** a DB station and a BVG rail stop of the same name
+          close by (Berlin Savignyplatz, S Savignyplatz) are linked; see
+          _link_networks.
         """
-        if not (self._merge and self._departures):
-            return {stop.key: stop for stop in candidates[: self._max_stops]}
+        merge_boards = self._merge and bool(self._departures)
+        if not (merge_boards or self._merge_networks):
+            return {stop.key: stop for stop in candidates[: self._max_stops]}, False
 
         pool = candidates[: self._max_stops * MERGE_CANDIDATE_FACTOR]
-        await asyncio.gather(*(self._update_departures(stop) for stop in pool))
+        if merge_boards:
+            await asyncio.gather(*(self._update_departures(stop) for stop in pool))
 
         groups: dict[Any, list[Stop]] = {}
         for stop in pool:
-            groups.setdefault(_board_signature(stop) or stop.key, []).append(stop)
+            signature = _board_signature(stop) if merge_boards else None
+            groups.setdefault(signature or stop.key, []).append(stop)
 
-        picked: dict[str, Stop] = {}
+        stops = []
         # Groups keep the order of their nearest stop.
-        for group in list(groups.values())[: self._max_stops]:
+        for group in groups.values():
             # The shortest name is usually the station itself, without the
             # street of its exit or bus bay.
             keep = min(group, key=lambda stop: len(stop.name))
             keep.merged = [stop.name for stop in group if stop is not keep]
-            picked[keep.key] = keep
-        return picked
+            stops.append(keep)
+        if self._merge_networks:
+            stops = _link_networks(stops)
+        picked = stops[: self._max_stops]
+        if merge_boards:
+            for stop in picked:
+                if stop.linked:
+                    stop.board = _combine_boards(
+                        stop.board, [s.board for s in stop.linked], self._departures
+                    )
+        return {stop.key: stop for stop in picked}, merge_boards
 
     async def async_search(self, query: str) -> list[Stop]:
         """Return the stops whose name matches, in DBF's order."""
@@ -555,12 +588,27 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
     # --- Departures -----------------------------------------------------
 
     async def async_board(self, eva: str, source: str) -> Board:
-        """Return the full departure board of any stop, briefly cached."""
+        """Return the full departure board of any stop, briefly cached.
+
+        For a stop on the map that is linked to the same station in another
+        network, that network's missing lines are included.
+        """
         key = f"{source}_{eva}"
         now = dt_util.utcnow()
         if (cached := self._boards.get(key)) and now - cached[0] < BOARD_CACHE_TTL:
             return cached[1]
-        board = await self._fetch_departures(eva, source, BOARD_ROWS, BOARD_DEPARTURES)
+        stop = self._stops.get(key)
+        # The public fallback's requests are scarce: own board only.
+        linked = stop.linked if stop and not self.fallback_active else []
+        board, *others = await asyncio.gather(
+            self._fetch_departures(eva, source, BOARD_ROWS, BOARD_DEPARTURES),
+            *(
+                self._fetch_departures(s.eva, s.source, BOARD_ROWS, BOARD_DEPARTURES)
+                for s in linked
+            ),
+        )
+        if others:
+            board = _combine_boards(board, others, BOARD_DEPARTURES)
         self._boards = {
             k: v for k, v in self._boards.items() if now - v[0] < BOARD_CACHE_TTL
         }
@@ -570,9 +618,14 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
 
     async def _update_departures(self, stop: Stop) -> None:
         # IRIS boards include arrival-only entries, so ask for extra rows.
-        stop.board = await self._fetch_departures(
-            stop.eva, stop.source, self._departures * 3, self._departures
+        rows, keep = self._departures * 3, self._departures
+        # The public fallback's requests are scarce: own board only.
+        linked = [] if self.fallback_active else stop.linked
+        board, *others = await asyncio.gather(
+            self._fetch_departures(stop.eva, stop.source, rows, keep),
+            *(self._fetch_departures(s.eva, s.source, rows, keep) for s in linked),
         )
+        stop.board = _combine_boards(board, others, keep) if others else board
 
     async def _fetch_departures(
         self, eva: str, source: str, rows: int, keep: int
@@ -677,6 +730,91 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
             )
         else:
             ir.async_delete_issue(self.hass, DOMAIN, ISSUE_MISSING_COORDINATES)
+
+
+def _line_key(line: Any) -> str:
+    """Return a line name comparable across networks ("S 7" and "S7")."""
+    return re.sub(r"\s+", "", str(line or "")).upper()
+
+
+def _station_names(name: str, *, drop_city: bool) -> set[str]:
+    """Return comparable forms of a station name.
+
+    DB names start with the town ("Berlin Savignyplatz", "Berlin-Spandau"),
+    BVG names end with it in brackets and start with the rail mode
+    ("S Savignyplatz (Berlin)", "S+U Friedrichstr. Bhf (Berlin)"). With
+    drop_city, the form without the first word (the town) is included too.
+    """
+    n = name.lower()
+    n = re.sub(r"\[[^\]]*\]|\([^)]*\)", " ", n)  # [Bus], (Berlin), (S), (tief)
+    n = re.sub(r"^\s*(s\+u|s|u)\s+", "", n)
+    n = re.sub(r"stra(ß|ss)e\b|str\.", "str", n)
+    n = re.sub(r"\bhbf\b", "hauptbahnhof", n)
+    n = re.sub(r"\bbhf\b", " ", n)
+    words = re.sub(r"[^\w]+", " ", n).split()
+    forms = {" ".join(words)}
+    if drop_city and len(words) > 1:
+        forms.add(" ".join(words[1:]))
+    return forms - {""}
+
+
+def _link_networks(stops: list[Stop]) -> list[Stop]:
+    """Link each DB station to the BVG (HAFAS) rail stop of the same station.
+
+    The HAFAS stop stays: its board has the U-Bahn, trams and buses, and the
+    S-Bahn like DB's. The DB station joins its merged names and only adds
+    the lines missing there (regional and long-distance trains). Bus and
+    tram stops never qualify, so "Savignyplatz (Berlin)", the bus stop,
+    stays separate from the station.
+    """
+    hafas_rail = [
+        stop
+        for stop in stops
+        if stop.source != SOURCE_DB and stop.name.startswith(RAIL_NAME_PREFIXES)
+    ]
+    kept: list[Stop] = []
+    for stop in stops:
+        if stop.source == SOURCE_DB:
+            names = _station_names(stop.name, drop_city=True)
+            matches = []
+            for other in hafas_rail:
+                if not _station_names(other.name, drop_city=False) & names:
+                    continue
+                dist = geo_distance(
+                    stop.latitude, stop.longitude, other.latitude, other.longitude
+                )
+                if dist is not None and dist <= MERGE_NETWORK_MAX_METERS:
+                    matches.append((dist, other))
+            if matches:
+                target = min(matches, key=lambda item: item[0])[1]
+                target.linked.append(stop)
+                target.merged.extend([stop.name, *stop.merged])
+                continue
+        kept.append(stop)
+    return kept
+
+
+def _combine_boards(own: Board, others: list[Board], keep: int) -> Board:
+    """Add the lines of other networks' boards that the own board lacks.
+
+    DB and BVG both list the S-Bahn; taking each line from one board only
+    avoids showing a train twice, without matching individual trips.
+    """
+    if own.unreachable:
+        return own
+    departures = list(own.departures)
+    lines = {_line_key(dep["line"]) for dep in departures}
+    for other in others:
+        added = [dep for dep in other.departures if _line_key(dep["line"]) not in lines]
+        lines |= {_line_key(dep["line"]) for dep in added}
+        departures.extend(added)
+    departures.sort(key=lambda dep: dep["minutes"])
+    return Board(
+        departures=departures[:keep],
+        error=None if departures else own.error,
+        via=own.via,
+        fallback=own.fallback,
+    )
 
 
 def _board_signature(stop: Stop) -> tuple[Any, ...] | None:

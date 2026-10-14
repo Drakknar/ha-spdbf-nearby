@@ -63,6 +63,7 @@ class SpdbfStop(CoordinatorEntity[SpdbfCoordinator], GeolocationEvent):
             "url",
             "merged_stops",
             "fallback",
+            "networks",
         }
     )
 
@@ -110,6 +111,8 @@ class SpdbfStop(CoordinatorEntity[SpdbfCoordinator], GeolocationEvent):
         }
         if stop.merged:
             attrs["merged_stops"] = stop.merged
+        if stop.linked:
+            attrs["networks"] = stop.networks
         if board.via:
             attrs["departures_via"] = board.via
         if board.fallback:

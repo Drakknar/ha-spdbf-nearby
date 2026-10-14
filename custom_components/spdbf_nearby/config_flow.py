@@ -36,6 +36,7 @@ from .const import (
     CONF_FALLBACK_URL,
     CONF_MAX_STOPS,
     CONF_MERGE_DUPLICATES,
+    CONF_MERGE_NETWORKS,
     CONF_PUBLIC_URL,
     CONF_RADIUS,
     CONF_SCAN_INTERVAL,
@@ -47,6 +48,7 @@ from .const import (
     DEFAULT_FALLBACK_URL,
     DEFAULT_MAX_STOPS,
     DEFAULT_MERGE_DUPLICATES,
+    DEFAULT_MERGE_NETWORKS,
     DEFAULT_RADIUS,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SOURCES,
@@ -115,6 +117,10 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
             vol.Required(
                 CONF_MERGE_DUPLICATES,
                 default=values.get(CONF_MERGE_DUPLICATES, DEFAULT_MERGE_DUPLICATES),
+            ): BooleanSelector(),
+            vol.Required(
+                CONF_MERGE_NETWORKS,
+                default=values.get(CONF_MERGE_NETWORKS, DEFAULT_MERGE_NETWORKS),
             ): BooleanSelector(),
             vol.Required(
                 CONF_FALLBACK, default=values.get(CONF_FALLBACK, DEFAULT_FALLBACK)
