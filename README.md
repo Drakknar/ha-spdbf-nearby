@@ -102,7 +102,7 @@ For the connections you use: one card per stop, from a [db_infoscreen](https://g
 
 - **Departures** with line colours (Berlin S- and U-Bahn), platform, minutes, delay and cancellations, the same look as the departure dialog.
 - **Tap a departure** for its trip, or the title for the stop's full board.
-- **Filters that stay right:** in the editor, pick a platform from a list that shows the lines and destinations stopping there (the platform is the direction). Lines and destinations are suggested from what the sensor has now. A check at the top says what the card would show, and warns about a filter that matches nothing, e.g. a destination the line doesn't reach tonight because it turns back early. Prefer platform and line over destination: lines often end early, and a destination filter then empties the card.
+- **Filters that stay right:** in the editor, pick a platform from a list that shows the lines and destinations stopping there (the platform is the direction). Lines and destinations are suggested from what the sensor has now. A check at the top says what the card would show, and warns about a filter that matches nothing, e.g. a destination the line doesn't reach tonight because it turns back early. Prefer platform and line over destination: lines often end early, and a destination filter then empties the card. At stops without platforms (most bus stops), hide the other direction's destinations instead: a bus that ends early in your direction still shows.
 - **Changing trains:** a row at the top links the card to the one before, e.g. "↓ 15 min ride · 4 min walk". Each part can be turned off.
   - **Ride:** set "Ride from" to the previous card's sensor. The ride is timed on that sensor's lines (S-Bahn to S-Bahn, bus to bus), so it ends where that train arrives. It comes from BVG trip data, which needs the patched DBF image; DB's data has no reliable per-stop times for S-Bahn trains.
   - **Walk:** the minutes you enter for the change, from where that train arrives to this card's platform.
@@ -115,6 +115,7 @@ departures: 6           # optional
 platforms: ["11"]       # optional: "2" also matches BVG's "2 (U2)"
 lines: [S41]            # optional: only these lines
 destinations: [Pankow]  # optional: part of the destination is enough
+hide_destinations: [Staaken]  # optional: hide these; for stops without platforms
 ride_from: sensor.db_infoscreen_berlin_savignyplatz_departures  # optional
 walk_minutes: 4         # optional
 show_ride: true         # optional
