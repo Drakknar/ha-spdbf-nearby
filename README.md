@@ -59,11 +59,13 @@ The stops appear on the built-in **Map** panel with no setup. For a dashboard, [
 
 ### Stop search card
 
+Dashboard → Edit → **Add card** → **spdbf stop search** (under custom cards). The integration loads the card itself, so there's no dashboard resource to add. Its options have a visual editor. It fits under a heading card in a sections dashboard.
+
+In YAML:
+
 ```yaml
 type: custom:spdbf-stop-search-card
 ```
-
-The integration loads the card itself, so there's no dashboard resource to add. It fits under a heading card in a sections dashboard.
 
 - **Empty field:** tap it to list the stops near you. The card asks the browser for your location. Without it (permission denied, or not on HTTPS), it uses the person or device the integration follows.
 - **Typing:** two characters or more search DB and your HAFAS sources by name.
