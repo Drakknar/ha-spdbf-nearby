@@ -25,6 +25,8 @@ Show public transport stops near you on the Home Assistant map, with live depart
 2. Add `https://github.com/Drakknar/ha-spdbf-nearby` as type **Integration**.
 3. Install **spdbf Nearby Stops**, then restart Home Assistant.
 
+Updates are published as [releases](https://github.com/Drakknar/ha-spdbf-nearby/releases), which HACS offers as they appear.
+
 ### Manual
 
 Copy `custom_components/spdbf_nearby` into your Home Assistant `config/custom_components/` folder, then restart Home Assistant.
