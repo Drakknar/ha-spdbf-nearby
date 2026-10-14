@@ -86,7 +86,10 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
   - **Views:** "By line" (default) groups by line and destination, with the next 3 departures each, ordered S-Bahn, U-Bahn, then the rest. DBF's JSON has no product type, so trams and buses can't be told apart. "By time" is the old flat list. The choice is kept in `localStorage` (`spdbf-departures-view`).
   - **Line colours:** for BVG and VBB stops, S- and U-Bahn chips use BVG's line colours; everything else uses the theme's primary colour.
   - **`window.spdbfShowStop(stop)`** opens the dialog for a stop from the card. If that stop is also a map entity (same eva and network), it opens as the entity.
-- **Stop search card (`www/spdbf-stop-search-card.js`, since 0.3.0):** `custom:spdbf-stop-search-card`, also listed in the card picker. It is loaded with `add_extra_js_url` like the dialog, so no Lovelace resource is needed.
+- **Stop search card (`www/spdbf-stop-search-card.js`, since 0.3.0):** `custom:spdbf-stop-search-card`. It is loaded with `add_extra_js_url` like the dialog, so no Lovelace resource is needed.
+  - **Card picker:** listed through `window.customCards`, with `preview: true` and a `documentationURL`.
+  - **Visual editor (since 0.3.1):** `static getConfigForm()` returns an `ha-form` schema, which HA's card editor renders natively; no editor element of our own. Checked 2026-10-14 in frontend 20260930.3: the card editor resolves the custom element class and calls its `getConfigForm`, as for built-in cards.
+  - **Form fields:** `placeholder` (text), `use_device_location` (boolean), `entry_id` (a `config_entry` selector filtered to `spdbf_nearby`). `getStubConfig` sets `use_device_location: true`, since a boolean field without a value shows as off.
   - **Searching:** 2+ characters search after 300 ms. With an empty field, focusing it lists nearby stops; that list is reused for a minute.
   - **Location:** the browser's location (needs HTTPS and permission, 5 s timeout), else the tracked entity.
   - **Options:** `placeholder`, `use_device_location`, `entry_id`.

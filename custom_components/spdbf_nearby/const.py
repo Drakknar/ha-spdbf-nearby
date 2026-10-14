@@ -38,7 +38,7 @@ HAFAS_SOURCES = [
 # Served from www/. Bump FRONTEND_VERSION when anything in www/ changes, so
 # browsers and the companion app fetch the new files.
 STATIC_URL = f"/{DOMAIN}"
-FRONTEND_VERSION = "0.3.0"
+FRONTEND_VERSION = "0.3.1"
 # Map marker pictures. Names starting like this are S-/U-Bahn stations.
 RAIL_NAME_PREFIXES = ("S ", "U ", "S+U ")
 

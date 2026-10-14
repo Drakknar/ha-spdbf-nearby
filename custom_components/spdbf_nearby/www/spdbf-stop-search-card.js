@@ -2,6 +2,8 @@
 // the other configured sources). Focusing the empty field lists the stops
 // near you; picking a stop opens its departures (spdbf-departures.js).
 // Loaded on every page by the integration, so no dashboard resource is needed.
+// It appears in the card picker, and getConfigForm gives it Home Assistant's
+// own visual editor.
 //
 //   type: custom:spdbf-stop-search-card
 //   placeholder: Search stops          # optional
@@ -15,6 +17,18 @@
   const MIN_QUERY = 2;
   const LOCATION_TIMEOUT_MS = 5000;
   const NEARBY_MAX_AGE_MS = 60000; // reuse the nearby list for a minute
+
+  const FORM_LABELS = {
+    placeholder: ["Placeholder", "Text in the empty search field. Default: Search stops"],
+    use_device_location: [
+      "Use this device's location",
+      "Nearby stops around this phone or browser. Off, or without permission: around the person the integration follows.",
+    ],
+    entry_id: [
+      "Integration entry",
+      "Only needed with several entries. By default: the one following the logged-in user's person.",
+    ],
+  };
 
   const STYLE = `
     :host { display: block; }
@@ -95,7 +109,20 @@
     }
 
     static getStubConfig() {
-      return {};
+      return { use_device_location: true };
+    }
+
+    // Rendered by Home Assistant's card editor as a native form.
+    static getConfigForm() {
+      return {
+        schema: [
+          { name: "placeholder", selector: { text: {} } },
+          { name: "use_device_location", selector: { boolean: {} } },
+          { name: "entry_id", selector: { config_entry: { integration: SOURCE } } },
+        ],
+        computeLabel: (field) => FORM_LABELS[field.name]?.[0],
+        computeHelper: (field) => FORM_LABELS[field.name]?.[1],
+      };
     }
 
     connectedCallback() {
@@ -294,5 +321,7 @@
     type: "spdbf-stop-search-card",
     name: "spdbf stop search",
     description: "Find DB and BVG stops by name or near you, and open their live departures.",
+    preview: true,
+    documentationURL: "https://github.com/Drakknar/ha-spdbf-nearby#stop-search-card",
   });
 })();
