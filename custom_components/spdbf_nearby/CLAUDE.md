@@ -134,7 +134,7 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
     - **Also:** HIM messages (e.g. lifts out of order), and a note when DBF has only stop names.
     - **Back:** "← Departures" returns to the board.
 - **Connection card (`www/spdbf-connection-card.js`, since 0.6.0):** `custom:spdbf-connection-card` shows one stop's departures from a db_infoscreen sensor. It replaces the owner's fork `Drakknar/ha-dbf-departures-card` on the Public transport dashboard. db_infoscreen stays, by the owner's choice.
-  - **Options:** `entity`, `title`, `icon`, `departures`, `lines`, `destinations` (case-insensitive part of the name), `walk_minutes`.
+  - **Options:** `entity`, `title`, `icon`, `departures`, `platforms` (exact, or the start before a space: "2" matches BVG's "2 (U2)"), `lines`, `destinations` (case-insensitive part of the name). `departureFilter(config)` is shared by the card and its editor, `walk_minutes`.
   - **Link row:** "↓ 15 min ride · 4 min walk" above the card; `show_ride` and `show_walk` turn each part off. It replaces the dashboard's hand-written "↓ N Mins" markdown.
     - **Ride (`ride_from`, the previous card's sensor):** `spdbf_nearby/ride` `{from: {eva, name, network}, to: {eva, name}, lines}` is called with the distinct tidy lines of that sensor's departures. Owner's rule: leaving at an S-Bahn station you arrive at an S-Bahn station, bus to bus, so the ride ends where that train arrives. At Alexanderplatz that's the S-Bahn, then you change to the U2.
     - **Walk (`walk_minutes`, typed in):** the change from there to this card's platform.
@@ -146,8 +146,12 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
     - **HAFAS** rows have `scheduledTime`, and `trip_id` (null until DBF sends `tripId`). Without a trip id, a tap opens the board.
     - **Network:** HAFAS rows are taken as BVG, since db_infoscreen doesn't expose its data source.
     - **Minutes** come from `departure_timestamp`, which is real-time.
-  - **Editor:** `getConfigForm` with entity (filtered to db_infoscreen sensors), title and icon in a grid, number, text-multiple and number (min) selectors.
-  - **Checked 2026-10-14** in a Node fake-DOM test on real sensor states (Savignyplatz DB, Alexanderplatz BVG with the U2/Pankow filter).
+  - **Editor (since 0.7.0):** `getConfigElement()` returns `spdbf-connection-card-editor`, which wraps HA's own `ha-form` (so it looks native), because the suggestions depend on the chosen sensor and a fixed `getConfigForm` schema can't do that.
+    - **Suggestions:** `select` selectors with `multiple` and `custom_value`, built from the sensor's current departures: platforms (sorted, labelled "line → destinations"), lines on the chosen platforms, destinations of the chosen lines. Chosen values not seen now stay listed as "(not seen now)".
+    - **Checks (`ha-alert`):** how many current departures the filters match, on which lines; a warning per filter value that matches nothing at its step (platform, then line, then destination).
+    - **Why (owner, 2026-10-14):** a destination filter (Ruhleben, Theodor-Heuss-Platz) emptied a journey card when the U2 turned back at Zoo. The platform is the direction. Compass directions and a "goes via" filter were rejected: BVG rows from DBF have no route.
+    - Empty filters are removed from the config.
+  - **Checked 2026-10-14** in a Node fake-DOM test on real sensor states (Schönhauser Allee U2, Westkreuz all platforms, Alexanderplatz platform 4).
 - **Stop search card (`www/spdbf-stop-search-card.js`, since 0.3.0):** `custom:spdbf-stop-search-card`. It is loaded with `add_extra_js_url` like the dialog, so no Lovelace resource is needed.
   - **Card picker:** listed through `window.customCards`, with `preview: true` and a `documentationURL`.
   - **Visual editor (since 0.3.1):** `static getConfigForm()` returns an `ha-form` schema, which HA's card editor renders natively; no editor element of our own. Checked 2026-10-14 in frontend 20260930.3: the card editor resolves the custom element class and calls its `getConfigForm`, as for built-in cards.
