@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from typing import Any
 
 import voluptuous as vol
@@ -65,6 +66,34 @@ def _error_code(err: DbfError) -> str:
     return "server_unreachable" if isinstance(err, ServerUnreachable) else "dbf_error"
 
 
+async def _reply(
+    connection: websocket_api.ActiveConnection, msg: dict[str, Any], call: Awaitable[Any]
+) -> None:
+    """Send the call's result, or DBF's error."""
+    try:
+        result = await call
+    except DbfError as err:
+        connection.send_error(msg["id"], _error_code(err), str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+def _bad_networks(
+    coordinator: SpdbfCoordinator,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+    networks: set[str],
+    also: frozenset[str] = frozenset(),
+) -> bool:
+    """Report networks that aren't configured sources; True if there were any."""
+    if bad := sorted(networks - {*coordinator.sources, *also}):
+        connection.send_error(
+            msg["id"], "invalid_network", f"{', '.join(bad)} is not a configured source"
+        )
+        return True
+    return False
+
+
 def _position(msg: dict[str, Any]) -> Position | None:
     if "latitude" in msg:
         return msg["latitude"], msg["longitude"]
@@ -105,17 +134,15 @@ async def ws_search(
     """Search stops by name."""
     if (coordinator := _coordinator(hass, connection, msg)) is None:
         return
-    try:
-        stops = await coordinator.client.async_search(
-            msg["query"], _position(msg) or coordinator.tracked_position()
-        )
-    except DbfError as err:
-        connection.send_error(msg["id"], _error_code(err), str(err))
-        return
     pos = _position(msg)
-    connection.send_result(
-        msg["id"], {"stops": [_stop_json(coordinator, stop, pos) for stop in stops]}
-    )
+
+    async def search() -> dict[str, Any]:
+        stops = await coordinator.client.async_search(
+            msg["query"], pos or coordinator.tracked_position()
+        )
+        return {"stops": [_stop_json(coordinator, stop, pos) for stop in stops]}
+
+    await _reply(connection, msg, search())
 
 
 @websocket_api.websocket_command(
@@ -129,14 +156,12 @@ async def ws_nearby(
     if (coordinator := _coordinator(hass, connection, msg)) is None:
         return
     pos = _position(msg)
-    try:
+
+    async def nearby() -> dict[str, Any]:
         stops = await coordinator.async_nearby(pos)
-    except DbfError as err:
-        connection.send_error(msg["id"], _error_code(err), str(err))
-        return
-    connection.send_result(
-        msg["id"], {"stops": [_stop_json(coordinator, stop, pos) for stop in stops]}
-    )
+        return {"stops": [_stop_json(coordinator, stop, pos) for stop in stops]}
+
+    await _reply(connection, msg, nearby())
 
 
 @websocket_api.websocket_command(
@@ -159,10 +184,7 @@ async def ws_board(
         return
     linked = msg.get("linked")
     networks = {msg["network"], *(item["network"] for item in linked or [])}
-    if bad := sorted(networks - set(coordinator.sources)):
-        connection.send_error(
-            msg["id"], "invalid_network", f"{', '.join(bad)} is not a configured source"
-        )
+    if _bad_networks(coordinator, connection, msg, networks):
         return
     board = await coordinator.async_board(
         msg["eva"],
@@ -186,11 +208,7 @@ async def ws_board(
 
 _TRIP = vol.Any(
     {vol.Required("id"): str, vol.Required("hafas"): str},
-    {
-        vol.Required("train"): str,
-        vol.Required("station"): str,
-        vol.Optional("scheduled"): str,
-    },
+    {vol.Required("train"): str, vol.Required("station"): str},
 )
 _STATION = {vol.Optional("eva"): str, vol.Optional("name"): str}
 
@@ -206,18 +224,12 @@ async def ws_trip(
     if (coordinator := _coordinator(hass, connection, msg)) is None:
         return
     trip = msg["trip"]
-    if trip.get("hafas") and trip["hafas"] not in {*coordinator.sources, "ÖBB"}:
-        # ÖBB is the integration's own fallback for empty DB boards.
-        connection.send_error(
-            msg["id"], "invalid_network", f"{trip['hafas']} is not a configured source"
-        )
+    # ÖBB is the integration's own fallback for empty DB boards.
+    if trip.get("hafas") and _bad_networks(
+        coordinator, connection, msg, {trip["hafas"]}, frozenset({"ÖBB"})
+    ):
         return
-    try:
-        result = await coordinator.client.async_trip(trip)
-    except DbfError as err:
-        connection.send_error(msg["id"], _error_code(err), str(err))
-        return
-    connection.send_result(msg["id"], result)
+    await _reply(connection, msg, coordinator.client.async_trip(trip))
 
 
 @websocket_api.websocket_command(
@@ -236,9 +248,9 @@ async def ws_ride(
     """Return the scheduled ride between two stations, or null."""
     if (coordinator := _coordinator(hass, connection, msg)) is None:
         return
-    try:
-        ride = await coordinator.client.async_ride(msg["from"], msg["to"], msg.get("lines"))
-    except DbfError as err:
-        connection.send_error(msg["id"], _error_code(err), str(err))
+    start = msg["from"]
+    if start.get("network") and _bad_networks(coordinator, connection, msg, {start["network"]}):
         return
-    connection.send_result(msg["id"], ride)
+    await _reply(
+        connection, msg, coordinator.client.async_ride(start, msg["to"], msg.get("lines"))
+    )

@@ -523,8 +523,6 @@
       return ha.callWS(request);
     },
   };
-  // Name used before 0.5.0.
-  window.spdbfShowStop = showStop;
 
   // Capture on window runs before Home Assistant's own handler, which
   // listens on the <home-assistant> element.

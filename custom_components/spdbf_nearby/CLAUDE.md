@@ -128,7 +128,7 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
   - **Full board (since 0.3.0):** on open the dialog calls `spdbf_nearby/board` and reloads it every 30 s. Until the first answer it shows the entity's own departures, if it has any.
   - **Views:** "By line" (default) groups by line and destination, with the next 3 departures each, ordered S-Bahn, U-Bahn, then the rest. DBF's JSON has no product type, so trams and buses can't be told apart. "By time" is the old flat list. The choice is kept in `localStorage` (`spdbf-departures-view`).
   - **Line colours:** for BVG and VBB stops, S- and U-Bahn chips use BVG's line colours; everything else uses the theme's primary colour.
-  - **`dbfCore.showStop(stop)`** (formerly `window.spdbfShowStop`, still defined) opens the dialog for a stop. If that stop is also a map entity (same eva and network), it opens as the entity. `dbfCore.showTrip(stop, dep)` opens it on a departure's trip.
+  - **`dbfCore.showStop(stop)`** (`window.spdbfShowStop` until 0.6.0) opens the dialog for a stop. If that stop is also a map entity (same eva and network), it opens as the entity. `dbfCore.showTrip(stop, dep)` opens it on a departure's trip.
   - **Trip view (since 0.5.0):** tapping a departure (a row in either view; in "By line", the next departure of that line) opens its trip.
     - **Shown:** the trip's stops with times and delays, and platforms. Stops before the station are dimmed; the station itself is bold, matched by eva, the `current` flag or name.
     - **Also:** HIM messages (e.g. lifts out of order), and a note when DBF has only stop names.
