@@ -468,8 +468,7 @@ class DbfClient:
         trip = None
         if train and raw.get("trainNumber"):
             # DB trips are found by train type and number at this station.
-            trip = {"train": f"{train[0]} {raw['trainNumber']}", "station": eva,
-                    "scheduled": scheduled}
+            trip = {"train": f"{train[0]} {raw['trainNumber']}", "station": eva}
         line = tidy_line(raw.get("train"), raw.get("trainNumber"))
         return _departure(raw, line, when, raw.get("delayDeparture") or 0, now, trip)
 
@@ -627,12 +626,15 @@ def _ride_on(
 def _same_station(stop: dict[str, Any], station: dict[str, str]) -> bool:
     if station.get("eva") and stop.get("eva") and str(stop["eva"]) == str(station["eva"]):
         return True
-    if not (station.get("name") and stop.get("name")):
+    a, b = stop.get("name"), station.get("name")
+    if not (a and b):
         return False
-    # Either name may carry the town first (DB) or a rail prefix (BVG).
+    # One of the names may start with the town (DB: "Berlin Alexanderplatz").
+    # Dropping the first word of both would make "S Potsdam Hauptbahnhof"
+    # equal "Berlin Hbf".
     return bool(
-        station_names(stop["name"], drop_city=True)
-        & station_names(station["name"], drop_city=True)
+        station_names(a, drop_city=True) & station_names(b, drop_city=False)
+        or station_names(a, drop_city=False) & station_names(b, drop_city=True)
     )
 
 
@@ -692,9 +694,10 @@ def _iris_trip(payload: Any, fallback: bool) -> dict[str, Any]:
 
     The stop names (route_pre, route_post) come from IRIS and belong to this
     train. The times (route_*_diff) come from a separate lookup by train
-    number, which can pick another train with the same number: an S7 at
-    Berlin Westkreuz once got the times of a train near Stuttgart. They are
-    only used when their stop names match IRIS's.
+    number, which can pick another train with the same number (an S7 at
+    Berlin Westkreuz once got the times of a train near Stuttgart), and for
+    S-Bahn trains often hold names only. They are used only when they carry
+    times and the stops next to this station match IRIS's.
     """
     dep = payload.get("departure") if isinstance(payload, dict) else None
     if not isinstance(dep, dict):
