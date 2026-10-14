@@ -14,6 +14,7 @@
 //   platforms: ["2"]                 # optional filters; "2" also matches "2 (U2)"
 //   lines: [S41]
 //   destinations: [Pankow]           #   (part of the destination is enough)
+//   hide_destinations: [Staaken]     #   hides these; one ending early still shows
 //   ride_from: sensor.db_infoscreen_berlin_savignyplatz_departures
 //                                    # optional: the previous card's sensor
 //   walk_minutes: 4                  # optional walk from the previous card
@@ -76,6 +77,10 @@
       "Only these destinations",
       "The train's last stop; part of the name is enough. Lines often end early, so prefer platform and line. Empty: all.",
     ],
+    hide_destinations: [
+      "Hide these destinations",
+      "For stops without platforms (buses): hide the other direction's last stops, so a bus ending early in your direction still shows.",
+    ],
     ride_from: [
       "Ride from (the previous card's sensor)",
       "Shows the ride time from that station, on its lines, to this one.",
@@ -113,12 +118,14 @@
     const platforms = asList(config.platforms).map((p) => p.toLowerCase());
     const lines = asList(config.lines).map((line) => tidy(line).toUpperCase());
     const destinations = asList(config.destinations).map((d) => d.toLowerCase());
+    const hidden = asList(config.hide_destinations).map((d) => d.toLowerCase());
     return ({ dep, line }) => {
       const platform = String(dep.platform ?? "").trim().toLowerCase();
+      const destination = String(dep.destination ?? "").toLowerCase();
       return (!platforms.length || platforms.some((p) => platform === p || platform.startsWith(`${p} `)))
         && (!lines.length || lines.includes(line.toUpperCase()))
-        && (!destinations.length
-          || destinations.some((d) => String(dep.destination ?? "").toLowerCase().includes(d)));
+        && (!destinations.length || destinations.some((d) => destination.includes(d)))
+        && !hidden.some((d) => destination.includes(d));
     };
   };
 
@@ -157,11 +164,14 @@
     await tile?.constructor.getConfigElement?.();
   };
 
-  const FILTER_FIELDS = ["platforms", "lines", "destinations"];
+  const destinationLabel = (destination, rows) => `${destination} (${unique(rows.map(({ line }) => line)).join(", ")})`;
+
+  const FILTER_FIELDS = ["platforms", "lines", "destinations", "hide_destinations"];
   const NOT_SEEN = {
     platforms: (v) => `No departure from platform ${v} right now.`,
     lines: (v) => `${v} doesn't run here right now (on the chosen platforms).`,
     destinations: (v) => `No train to "${v}" right now; the line may be turning back early. A platform and line filter keeps working when it does.`,
+    hide_destinations: (v) => `Nothing to "${v}" right now, so hiding it changes nothing at the moment.`,
   };
 
   // The visual editor: Home Assistant's own form, with the platforms, lines
@@ -192,8 +202,12 @@
       // running now stay listed, and others can be typed.
       const pick = (name, groups, label) => {
         const options = [...groups].map(([value, grouped]) => ({ value, label: label(value, grouped) }));
+        // Destinations match part of the name, the others the whole value.
+        const partial = name.endsWith("destinations");
         for (const value of asList(config[name])) {
-          if (!options.some((o) => o.value.toLowerCase() === value.toLowerCase())) options.push({ value, label: `${value} (not seen now)` });
+          const v = value.toLowerCase();
+          const seen = options.some((o) => (partial ? o.value.toLowerCase().includes(v) : o.value.toLowerCase() === v));
+          if (!seen) options.push({ value, label: `${value} (not seen now)` });
         }
         return { name, selector: { select: { multiple: true, custom_value: true, options } } };
       };
@@ -211,8 +225,8 @@
         { name: "departures", selector: { number: { min: 1, max: 20, mode: "box" } } },
         pick("platforms", platforms, (platform, grouped) => `${platform}: ${routes(grouped)}`),
         pick("lines", byKey(onPlatforms, ({ line }) => line), (line, grouped) => routes(grouped)),
-        pick("destinations", byKey(onLines, destinationOf),
-          (destination, grouped) => `${destination} (${unique(grouped.map(({ line }) => line)).join(", ")})`),
+        pick("destinations", byKey(onLines, destinationOf), destinationLabel),
+        pick("hide_destinations", byKey(onLines, destinationOf), destinationLabel),
         { name: "ride_from", selector: { entity: { domain: "sensor", integration: "db_infoscreen" } } },
         { name: "walk_minutes", selector: { number: { min: 0, max: 60, mode: "box", unit_of_measurement: "min" } } },
         {
@@ -235,7 +249,10 @@
       let scope = rows;
       for (const field of FILTER_FIELDS) {
         for (const value of asList(config[field])) {
-          if (!scope.some(departureFilter({ [field]: [value] }))) checks.push({ type: "warning", text: NOT_SEEN[field](value) });
+          // A hidden destination is seen when hiding it removes a departure.
+          const keeps = departureFilter({ [field]: [value] });
+          const seen = field === "hide_destinations" ? scope.some((row) => !keeps(row)) : scope.some(keeps);
+          if (!seen) checks.push({ type: "warning", text: NOT_SEEN[field](value) });
         }
         scope = scope.filter(departureFilter({ [field]: config[field] }));
       }
