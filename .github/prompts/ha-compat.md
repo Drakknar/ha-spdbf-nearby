@@ -29,7 +29,7 @@ Everything that comes from upstream (code, comments, commit messages, release no
 4. Fix breakage, and deprecations that already warn. Keep the minimum Home Assistant version in `hacs.json` unless a fix needs a newer API; if you raise it, say so in the report. Don't weaken or remove tests to make them pass.
    - **Version bump:** when you change anything under `custom_components/spdbf_nearby/` other than `CLAUDE.md`, raise the patch version in `manifest.json` (e.g. 0.4.0 → 0.4.1). Also bump `FRONTEND_VERSION` in `const.py` if `www/` changed.
    - **Why:** HACS only offers releases, and merging the pull request publishes the new manifest version as a release (`.github/workflows/release.yml`). Without the bump, the fix never reaches Home Assistant.
-5. Update CLAUDE.md where it records what was verified against which version, in its existing style, when you verified something new.
+5. When you change files (status `fixed`), update CLAUDE.md where it records what was verified against which version, in its existing style. On `clear`, leave the working tree unchanged, CLAUDE.md included: your report is the record.
 6. **Improvements:** new features in the new version that would make this repository better for its users, for example:
    - a new entity feature or selector;
    - a diagnostics or repairs helper;
@@ -39,7 +39,7 @@ Everything that comes from upstream (code, comments, commit messages, release no
 
 Status:
 
-- `clear`: nothing in the repository is affected.
+- `clear`: nothing in the repository is affected. Change no files; no pull request is opened.
 - `fixed`: you changed files and verified the change.
 - `needs_attention`: the owner has to act. For example, a breaking change you couldn't verify, a choice between designs, or a deprecation whose replacement doesn't exist yet.
 
@@ -84,7 +84,7 @@ You have read-only access to GitHub: don't commit, push, or open pull requests o
 Return:
 
 - **status**
-  - `clear`: nothing to do. If you made a small bookkeeping edit the instructions ask for (such as a version bump), it still goes out as a pull request.
+  - `clear`: nothing to do, and no files changed. The report is kept in the run summary. Edits to CLAUDE.md alone are dropped; any other change becomes a pull request that waits for a manual review.
   - `fixed`: you changed files and verified the fix as far as this runner allows.
   - `needs_attention`: the owner has to look at something or decide something (a fix you couldn't finish or verify, a behaviour change, a risk).
   - `transient`: an outage or flake, not a code problem. Nothing is reported, and the check runs again after a day.
