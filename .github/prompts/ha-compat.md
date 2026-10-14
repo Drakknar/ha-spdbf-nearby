@@ -51,17 +51,27 @@ Status:
   - that every `homeassistant.*` name it imports still exists.
 
   If a fix is non-trivial, add a small pytest with `pytest-homeassistant-custom-component` that covers it, the way CLAUDE.md suggests (a fake DBF server, as in ha-audiocpp).
-- **Python side:** `geo_location` entities, `DataUpdateCoordinator`, state-change tracking, config and options flows, Repairs issues, `_unrecorded_attributes`, static paths and `add_extra_js_url` in the `http` and `frontend` integrations.
-- **Frontend side:** `www/spdbf-departures.js` depends on Home Assistant frontend internals. CLAUDE.md "How it works" and "Findings" list them:
-  - `hass-more-info` caught in the capture phase on `window`;
-  - the more-info dialog;
-  - `ha-map`, `ha-entity-marker` and the map engine.
+- **Python side:** `geo_location` entities, `DataUpdateCoordinator`, state-change tracking, config and options flows, Repairs issues, `_unrecorded_attributes`, static paths and `add_extra_js_url` in the `http` and `frontend` integrations, and WebSocket commands (`websocket_api.websocket_command`, `async_response`, `async_register_command`, `ActiveConnection.send_result`/`send_error`, `ConfigEntryState`, `entry.reason`).
+- **Frontend side:** both scripts in `www/` depend on Home Assistant frontend behaviour. CLAUDE.md "How it works" and "Findings" list it.
+  - **`spdbf-departures.js`:**
+    - `hass-more-info` caught in the capture phase on `window`;
+    - the more-info dialog;
+    - `ha-map`, `ha-entity-marker` and the map engine;
+    - `hass.callWS`.
+  - **`spdbf-stop-search-card.js`:**
+    - the card picker reading `window.customCards`;
+    - the card editor calling a custom card's static `getConfigForm()` (rendered with `ha-form`), and `getStubConfig`;
+    - the `text`, `boolean` and `config_entry` (with `integration`) selectors;
+    - `getGridOptions` in sections dashboards;
+    - `ha-card` and `ha-icon`.
 
   For a Home Assistant release, find the frontend version it ships and diff https://github.com/home-assistant/frontend between the two frontend tags for those files. If anything in `www/` changes, bump `FRONTEND_VERSION` in `const.py`.
-- **DBF:** the coordinator calls `POST /_geolocation` (`lat`, `lon`, `hafas`) and `GET /<eva>?mode=json&limit=…[&hafas=…]`, and reads the fields used in `coordinator.py`.
+- **DBF:** the coordinator calls `POST /_geolocation` (`lat`, `lon`, `hafas`, or `q` for the name search) and `GET /<eva>?mode=json&limit=…[&hafas=…]`, and reads the fields used in `coordinator.py`.
+  - **Name search:** `q=` exists only in the owner's patched build (`station-name-search.pl`); upstream answers it with an error.
+  - **Public fallback:** the optional fallback (`https://dbf.finalrewind.org`) runs upstream DBF, so upstream's response format matters there directly.
   - For a DBF change, diff `lib/` between the two commits and check those requests and fields.
   - You can run upstream DBF to check real responses: `docker run -d -p 8092:8092 -e 'DBFAKEDISPLAY_LISTEN=http://*:8092' derfnull/db-fakedisplay:latest`.
-  - The owner's patched build is `ghcr.io/drakknar/db-fakedisplay:latest`; it adds `lat`/`lon` for HAFAS stops.
+  - The owner's patched build is `ghcr.io/drakknar/db-fakedisplay:latest`; it adds `lat`/`lon` for HAFAS stops and the `q=` name search.
   - If upstream changed `/_geolocation`, say in the report that the patch in `Drakknar/db-fakedisplay-patched` may be affected too.
 
 ## Your result
