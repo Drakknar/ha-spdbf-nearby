@@ -16,6 +16,7 @@ from homeassistant.config_entries import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     EntitySelector,
     EntitySelectorConfig,
     NumberSelector,
@@ -31,7 +32,10 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_DEPARTURES,
+    CONF_FALLBACK,
+    CONF_FALLBACK_URL,
     CONF_MAX_STOPS,
+    CONF_MERGE_DUPLICATES,
     CONF_PUBLIC_URL,
     CONF_RADIUS,
     CONF_SCAN_INTERVAL,
@@ -39,7 +43,10 @@ from .const import (
     CONF_SOURCES,
     CONF_TRACKED_ENTITY,
     DEFAULT_DEPARTURES,
+    DEFAULT_FALLBACK,
+    DEFAULT_FALLBACK_URL,
     DEFAULT_MAX_STOPS,
+    DEFAULT_MERGE_DUPLICATES,
     DEFAULT_RADIUS,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SOURCES,
@@ -105,6 +112,17 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
             ): NumberSelector(
                 NumberSelectorConfig(min=0, max=10, step=1, mode=NumberSelectorMode.BOX)
             ),
+            vol.Required(
+                CONF_MERGE_DUPLICATES,
+                default=values.get(CONF_MERGE_DUPLICATES, DEFAULT_MERGE_DUPLICATES),
+            ): BooleanSelector(),
+            vol.Required(
+                CONF_FALLBACK, default=values.get(CONF_FALLBACK, DEFAULT_FALLBACK)
+            ): BooleanSelector(),
+            vol.Required(
+                CONF_FALLBACK_URL,
+                default=values.get(CONF_FALLBACK_URL) or DEFAULT_FALLBACK_URL,
+            ): url,
             vol.Required(
                 CONF_SCAN_INTERVAL,
                 default=values.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
@@ -181,6 +199,16 @@ class SpdbfOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             errors = await _validate(self.hass, user_input)
+            current_server = {**self.config_entry.data, **self.config_entry.options}.get(
+                CONF_SERVER_URL
+            )
+            # Your server may be down right now, which is when you'd want to
+            # turn on the fallback. Only a new server URL must answer.
+            if (
+                errors == {CONF_SERVER_URL: "cannot_connect"}
+                and user_input[CONF_SERVER_URL] == current_server
+            ):
+                errors = {}
             if not errors:
                 return self.async_create_entry(data=user_input)
         current = {

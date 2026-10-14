@@ -12,13 +12,19 @@
           "radius": "Search radius",
           "max_stops": "Maximum number of stops",
           "departures": "Departures per stop",
-          "scan_interval": "Departure refresh interval"
+          "merge_duplicates": "Merge duplicate stops",
+          "scan_interval": "Departure refresh interval",
+          "fallback": "Use a public DBF instance while yours is unreachable",
+          "fallback_url": "Public DBF instance"
         },
         "data_description": {
           "server_url": "Address of the DBF Docker container on your network, e.g. http://192.168.1.10:8092.",
           "public_url": "Optional. Where you open DBF in a browser, if that differs from the server URL. Each stop links here.",
           "sources": "DB uses DBF's built-in station list (DB InfraGO). Other entries are HAFAS services, e.g. BVG for Berlin buses, trams and U-Bahn.",
-          "departures": "Set to 0 to show stops only, without departures."
+          "departures": "Set to 0 to show stops only, without departures.",
+          "merge_duplicates": "Show one stop when several nearby stops have exactly the same departures, as BVG lists some stations several times (e.g. Alexanderplatz).",
+          "fallback": "Off by default. The public instance runs stock DBF: it allows about 10 requests per minute, so only the nearest 3 stops keep updating, and it has no stop search and no coordinates for BVG stops. Your server is retried every minute and used again as soon as it answers.",
+          "fallback_url": "Only used when the option above is on."
         }
       }
     },
@@ -43,11 +49,17 @@
           "radius": "Search radius",
           "max_stops": "Maximum number of stops",
           "departures": "Departures per stop",
-          "scan_interval": "Departure refresh interval"
+          "merge_duplicates": "Merge duplicate stops",
+          "scan_interval": "Departure refresh interval",
+          "fallback": "Use a public DBF instance while yours is unreachable",
+          "fallback_url": "Public DBF instance"
         },
         "data_description": {
           "sources": "DB uses DBF's built-in station list (DB InfraGO). Other entries are HAFAS services, e.g. BVG for Berlin buses, trams and U-Bahn.",
-          "departures": "Set to 0 to show stops only, without departures."
+          "departures": "Set to 0 to show stops only, without departures.",
+          "merge_duplicates": "Show one stop when several nearby stops have exactly the same departures, as BVG lists some stations several times (e.g. Alexanderplatz).",
+          "fallback": "Off by default. The public instance runs stock DBF: it allows about 10 requests per minute, so only the nearest 3 stops keep updating, and it has no stop search and no coordinates for BVG stops. Your server is retried every minute and used again as soon as it answers.",
+          "fallback_url": "Only used when the option above is on."
         }
       }
     },
@@ -61,6 +73,10 @@
     "missing_coordinates": {
       "title": "spdbf doesn't send coordinates for some stops",
       "description": "The DBF server at {server} returns HAFAS stops (such as BVG) without latitude and longitude, so they can't be shown on the map. DB stops still work.\n\nTo fix this, run the patched DBF image `ghcr.io/drakknar/db-fakedisplay` (see github.com/Drakknar/db-fakedisplay-patched). This notice disappears by itself once the server sends coordinates."
+    },
+    "server_unreachable": {
+      "title": "Your DBF server isn't reachable",
+      "description": "spdbf Nearby Stops couldn't reach the DBF server at {server} for several minutes ({reason}). It retries every minute.\n\n{fallback}\n\nCheck that the db-fakedisplay container is running. This notice disappears by itself once the server answers again."
     }
   }
 }

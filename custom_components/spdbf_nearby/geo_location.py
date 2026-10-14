@@ -11,26 +11,12 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import SpdbfConfigEntry
-from .const import (
-    DOMAIN,
-    FRONTEND_VERSION,
-    RAIL_NAME_PREFIXES,
-    SOURCE_DB,
-    STATIC_URL,
-)
+from .const import DOMAIN, FRONTEND_VERSION, STATIC_URL
 from .coordinator import SpdbfCoordinator, Stop
 
 # Marker kind -> icon shown in lists and dialogs. The map uses the matching
 # www/marker-<kind>.svg picture instead of the name's initials.
 MARKER_ICONS = {"train": "mdi:train", "bus": "mdi:bus", "stop": "mdi:bus-stop"}
-
-
-def _marker_kind(stop: Stop) -> str:
-    if stop.source == SOURCE_DB or stop.name.startswith(RAIL_NAME_PREFIXES):
-        return "train"
-    if stop.source == "BVG":
-        return "bus"
-    return "stop"
 
 
 async def async_setup_entry(
@@ -75,6 +61,8 @@ class SpdbfStop(CoordinatorEntity[SpdbfCoordinator], GeolocationEvent):
             "departures_error",
             "distance_km",
             "url",
+            "merged_stops",
+            "fallback",
         }
     )
 
@@ -84,7 +72,7 @@ class SpdbfStop(CoordinatorEntity[SpdbfCoordinator], GeolocationEvent):
         self.stop_key = stop.key
         self._stop = stop
         self._attr_name = stop.name
-        kind = _marker_kind(stop)
+        kind = stop.kind
         self._attr_icon = MARKER_ICONS[kind]
         self._attr_entity_picture = (
             f"{STATIC_URL}/marker-{kind}.svg?v={FRONTEND_VERSION}"
@@ -110,19 +98,26 @@ class SpdbfStop(CoordinatorEntity[SpdbfCoordinator], GeolocationEvent):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return stop details and upcoming departures."""
         stop = self._stop
+        board = stop.board
         attrs: dict[str, Any] = {
             "network": stop.source,
             "eva": stop.eva,
             "distance_km": self.distance,
-            "url": self.coordinator.board_url(stop),
-            "departures": stop.departures,
+            "url": self.coordinator.board_url(
+                stop.eva, stop.source, board.via, board.fallback
+            ),
+            "departures": board.departures,
         }
-        if stop.departures_via:
-            attrs["departures_via"] = stop.departures_via
-        if stop.departures_error:
-            attrs["departures_error"] = stop.departures_error
-        if stop.departures:
-            dep = stop.departures[0]
+        if stop.merged:
+            attrs["merged_stops"] = stop.merged
+        if board.via:
+            attrs["departures_via"] = board.via
+        if board.fallback:
+            attrs["fallback"] = True
+        if board.error:
+            attrs["departures_error"] = board.error
+        if board.departures:
+            dep = board.departures[0]
             attrs["next_departure"] = (
                 f"{dep['line']} → {dep['destination']} in {dep['minutes']} min"
             )
