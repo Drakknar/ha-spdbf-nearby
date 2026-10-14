@@ -66,6 +66,11 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
     - **Applies to:** the entity's departures and the dialog's `board` command for that stop.
     - **While on the public fallback:** only the own board is fetched.
   - **When:** it runs at lookup time after the same-board merge. Unlike that one, it also works with departures set to 0.
+  - **Search and nearby results (since 0.4.1):** the same linking applies to `search` results and to a fresh `nearby` lookup elsewhere, since it needs no departures.
+    - **Linked stops:** results carry `linked` (`[{eva, network}]`), and the dialog sends it with `board`, so a searched DB + BVG station shows both networks.
+    - **Exit stops** of one station (Dircksenstr., Gontardstr., …) still appear separately in search: telling them apart would take a board per result.
+  - **Search ranking (since 0.4.1):** DB's station list matches loosely, and DBF lists DB before BVG. Live on 2026-10-14, "Alexanderplatz" started with "Neanderthal" and "Hauptbahnhof" with Düsseldorf.
+    - **Order:** first the station itself (its normalised name equals the query, "Hbf" = "Hauptbahnhof"), then other names containing the query (e.g. its exits), then the rest; nearest first within each group. Distance is measured from the card's position, else the tracked person.
 - **Stop search (since 0.3.0):** `POST <server>/_geolocation` with `q=<name>` and `hafas=<service>`, once per HAFAS source like the coordinate lookup. This needs the `station-name-search.pl` patch of `Drakknar/db-fakedisplay-patched`. Upstream answers `{"error": "Invalid lon/lat received"}`, which the coordinator turns into a "use the patched image" message. Upstream's own name search only renders HTML, and its JSON mode returns just an error for ambiguous names.
 - **Your server down (since 0.3.0):** all requests go through `_request_json`.
   - **Fast fail:** a connection error, a timeout (5 s to connect, 20 s in total) or a gateway status (502/503/504) marks the server down. Any other HTTP error comes from DBF itself and doesn't count.
@@ -84,7 +89,7 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
 - **WebSocket commands (`websocket_api.py`):**
   - **`search`** `{query}` and **`nearby`** `{latitude?, longitude?}` return `stops` with name, eva, network, coordinates, `distance_km`, `entity_picture`, `url`, `merged_stops` and `networks`.
   - **`nearby` without a position,** or within 100 m of the tracked entity, returns the coordinator's current (merged) stops. Elsewhere it does a fresh, unmerged lookup.
-  - **`board`** `{eva, network}` returns up to 80 departures (150 rows asked from DBF), cached for 20 s per stop (not while unreachable). It also returns `fallback` and `server_unreachable`. `network` must be a configured source.
+  - **`board`** `{eva, network, linked?}` returns up to 80 departures (150 rows asked from DBF), cached for 20 s per stop (not while unreachable). It also returns `fallback` and `server_unreachable`. `network` must be a configured source.
   - **Errors:** `server_unreachable`, `dbf_error`, `not_ready`, `not_found`, `invalid_network`.
   - **Which entry:** each command takes an optional `entry_id`. By default it uses the entry whose tracked person belongs to the logged-in user, else the first loaded entry.
 - **Entities:** `geo_location` entities, state = distance in km.

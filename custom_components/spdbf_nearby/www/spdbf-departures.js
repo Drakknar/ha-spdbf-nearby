@@ -148,7 +148,11 @@
     const mine = session;
     loading = true;
     try {
-      const result = await ha.callWS({ type: `${SOURCE}/board`, eva: stop.eva, network: stop.network });
+      const request = { type: `${SOURCE}/board`, eva: stop.eva, network: stop.network };
+      // A searched DB + BVG station names its other network; a map stop
+      // doesn't need to, the integration knows it.
+      if (!entityId && stop.linked?.length) request.linked = stop.linked;
+      const result = await ha.callWS(request);
       if (mine !== session) return;
       board = result;
       boardError = null;

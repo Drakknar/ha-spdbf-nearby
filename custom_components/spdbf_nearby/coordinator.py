@@ -552,8 +552,14 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
                     )
         return {stop.key: stop for stop in picked}, merge_boards
 
-    async def async_search(self, query: str) -> list[Stop]:
-        """Return the stops whose name matches, in DBF's order."""
+    async def async_search(self, query: str, pos: Position | None = None) -> list[Stop]:
+        """Return the stops whose name matches, best matches first.
+
+        DB's station list matches loosely ("Neanderthal" for
+        "Alexanderplatz"), and DBF lists DB before BVG. So stops whose name
+        contains the query come first, then the nearest (from pos, else the
+        tracked entity); DBF's order breaks ties.
+        """
         try:
             # Stock DBF (the public fallback) can't search by name as JSON.
             stops, _, _ = await self._fetch_candidates({"q": query}, allow_fallback=False)
@@ -566,6 +572,29 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
                     " ghcr.io/drakknar/db-fakedisplay (station-name-search)."
                 ) from err
             raise
+        if self._merge_networks:
+            stops = _link_networks(stops)
+        wanted = _search_text(query)
+        wanted_names = _station_names(query, drop_city=False)
+
+        def rank(stop: Stop) -> tuple[int, bool, float]:
+            # Only DB names start with the town; in BVG's the first word is
+            # part of the name ("Uhlandstr./Kantstr.").
+            members = [stop, *stop.linked]
+            if any(
+                _station_names(s.name, drop_city=s.source == SOURCE_DB) & wanted_names
+                for s in members
+            ):
+                tier = 0  # the station itself: "S+U Alexanderplatz Bhf (Berlin)"
+            elif any(wanted in _search_text(s.name) for s in members):
+                tier = 1  # e.g. its exits: "S+U Alexanderplatz Bhf/Gontardstr."
+            else:
+                tier = 2
+            meters = self.distance_m(stop, pos)
+            # Among equal names, a DB + BVG station before a bus bay.
+            return tier, not stop.linked, meters if meters is not None else float("inf")
+
+        stops.sort(key=rank)
         return stops[:SEARCH_MAX_RESULTS]
 
     async def async_nearby(self, pos: Position | None) -> list[Stop]:
@@ -583,28 +612,36 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
             stops.sort(key=lambda stop: self.distance_m(stop) or 0)
             return stops
         stops, _ = await self._fetch_stops(pos)
+        if self._merge_networks:
+            stops = _link_networks(stops)
         return stops[: self._max_stops]
 
     # --- Departures -----------------------------------------------------
 
-    async def async_board(self, eva: str, source: str) -> Board:
+    async def async_board(
+        self, eva: str, source: str, linked: list[tuple[str, str]] | None = None
+    ) -> Board:
         """Return the full departure board of any stop, briefly cached.
 
-        For a stop on the map that is linked to the same station in another
-        network, that network's missing lines are included.
+        linked lists the same station in other networks as (eva, source), as
+        search results carry it; their missing lines are included. Without
+        it, a stop on the map uses the stations it is linked to.
         """
-        key = f"{source}_{eva}"
+        if linked is None:
+            stop = self._stops.get(f"{source}_{eva}")
+            linked = [(s.eva, s.source) for s in stop.linked] if stop else []
+        # The public fallback's requests are scarce: own board only.
+        if self.fallback_active:
+            linked = []
+        key = "+".join(f"{s}_{e}" for e, s in [(eva, source), *linked])
         now = dt_util.utcnow()
         if (cached := self._boards.get(key)) and now - cached[0] < BOARD_CACHE_TTL:
             return cached[1]
-        stop = self._stops.get(key)
-        # The public fallback's requests are scarce: own board only.
-        linked = stop.linked if stop and not self.fallback_active else []
         board, *others = await asyncio.gather(
             self._fetch_departures(eva, source, BOARD_ROWS, BOARD_DEPARTURES),
             *(
-                self._fetch_departures(s.eva, s.source, BOARD_ROWS, BOARD_DEPARTURES)
-                for s in linked
+                self._fetch_departures(e, s, BOARD_ROWS, BOARD_DEPARTURES)
+                for e, s in linked
             ),
         )
         if others:
@@ -735,6 +772,12 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
 def _line_key(line: Any) -> str:
     """Return a line name comparable across networks ("S 7" and "S7")."""
     return re.sub(r"\s+", "", str(line or "")).upper()
+
+
+def _search_text(text: str) -> str:
+    """Return text for matching a typed query: lower case, words only."""
+    text = re.sub(r"stra(ß|ss)e\b|str\.", "str", text.lower())
+    return " ".join(re.sub(r"[^\w]+", " ", text).split())
 
 
 def _station_names(name: str, *, drop_city: bool) -> set[str]:
