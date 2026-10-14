@@ -13,6 +13,7 @@ CONF_MAX_STOPS = "max_stops"
 CONF_DEPARTURES = "departures"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_MERGE_DUPLICATES = "merge_duplicates"
+CONF_MERGE_NETWORKS = "merge_networks"
 CONF_FALLBACK = "fallback"
 CONF_FALLBACK_URL = "fallback_url"
 
@@ -21,6 +22,7 @@ DEFAULT_MAX_STOPS = 12
 DEFAULT_DEPARTURES = 5
 DEFAULT_SCAN_INTERVAL = 60  # seconds
 DEFAULT_MERGE_DUPLICATES = True
+DEFAULT_MERGE_NETWORKS = True
 DEFAULT_FALLBACK = False
 DEFAULT_FALLBACK_URL = "https://dbf.finalrewind.org"
 
@@ -38,7 +40,7 @@ HAFAS_SOURCES = [
 # Served from www/. Bump FRONTEND_VERSION when anything in www/ changes, so
 # browsers and the companion app fetch the new files.
 STATIC_URL = f"/{DOMAIN}"
-FRONTEND_VERSION = "0.3.1"
+FRONTEND_VERSION = "0.4.0"
 # Map marker pictures. Names starting like this are S-/U-Bahn stations.
 RAIL_NAME_PREFIXES = ("S ", "U ", "S+U ")
 
@@ -57,6 +59,9 @@ MAX_GPS_ACCURACY_METERS = 250
 # identical departures to merge two stops.
 MERGE_CANDIDATE_FACTOR = 2
 MERGE_MIN_DEPARTURES = 2
+# A DB station and a HAFAS (BVG) rail stop of the same name, at most this far
+# apart, are one station: "Berlin Savignyplatz" and "S Savignyplatz (Berlin)".
+MERGE_NETWORK_MAX_METERS = 300
 
 # Full departure board, as shown in the departure dialog.
 BOARD_ROWS = 150  # rows asked from DBF; IRIS boards include arrival-only rows

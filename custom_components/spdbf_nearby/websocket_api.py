@@ -81,6 +81,7 @@ def _stop_json(
         "entity_picture": f"{STATIC_URL}/marker-{stop.kind}.svg?v={FRONTEND_VERSION}",
         "url": coordinator.board_url(stop.eva, stop.source),
         "merged_stops": stop.merged,
+        "networks": stop.networks,
     }
 
 

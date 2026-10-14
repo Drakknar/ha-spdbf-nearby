@@ -7,6 +7,7 @@ Show public transport stops near you on the Home Assistant map, with live depart
 - **Tap a stop for its departures.** The dialog loads the stop's full board, grouped by line and destination ("U2 → Pankow: 2 · 7 · 12 min"), or sorted by time if you prefer. You get platforms, delays and cancellations, plus a link to the DBF board. This works on the Map panel, on any map card, from entity search and from the stop search card. It follows your theme, including light/dark mode.
 - **Search any stop.** A dashboard card finds DB and BVG stops by name. Tap the empty field to list the stops near you.
 - **One marker per station.** BVG lists some stations several times (Alexanderplatz has a stop for each exit and bus bay, all with the same board). Stops with identical departures are merged into one.
+- **DB and BVG together.** A DB station and the BVG S-/U-Bahn stop of the same station, such as Berlin Savignyplatz and S Savignyplatz, are one marker. It shows every BVG line plus the DB lines BVG doesn't list, such as regional and long-distance trains.
 - **DB + BVG by default.** Any HAFAS network that DBF supports can be added.
 - **Local:** Home Assistant only talks to your DBF server.
 
@@ -47,6 +48,7 @@ After installing or updating, reload the Home Assistant page or companion app on
 | Maximum number of stops | 12 | The nearest stops are kept. |
 | Departures per stop | 5 | Departures kept on each map stop (for `next_departure` and Markdown cards). The dialog always loads the full board. Set to 0 to show stops only. |
 | Merge duplicate stops | on | Show one stop when nearby stops have exactly the same departures. Needs departures turned on. |
+| Merge DB and BVG stations | on | Show a DB station and the BVG S-/U-Bahn stop of the same name, at most 300 m apart, as one stop. Bus and tram stops stay separate. |
 | Use a public DBF instance while yours is unreachable | off | See [When your DBF server is down](#when-your-dbf-server-is-down). |
 | Public DBF instance | `https://dbf.finalrewind.org` | The instance used for that. |
 | Departure refresh interval | 60 s | How often departures are updated. |
@@ -87,7 +89,8 @@ Each stop is a `geo_location` entity with these attributes:
 | `departures` | List of `line`, `destination`, `platform`, `scheduled`, `delay`, `minutes`, `cancelled` |
 | `next_departure` | For example `S3 → Spandau in 4 min` |
 | `url` | Link to the DBF departure board |
-| `merged_stops` | Names of nearby stops with the same board, merged into this one |
+| `merged_stops` | Names of nearby stops merged into this one: the same board, or the same station in DB |
+| `networks` | For a merged DB + BVG station: the networks its departures come from, e.g. `["BVG", "DB"]` |
 | `departures_via` | The source the departures came from, when DBF's DB source was empty and the integration used its fallback (ÖBB) |
 | `departures_error` | Why no departures could be fetched, if no source had any |
 

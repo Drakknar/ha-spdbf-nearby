@@ -13,6 +13,7 @@
           "max_stops": "Maximum number of stops",
           "departures": "Departures per stop",
           "merge_duplicates": "Merge duplicate stops",
+          "merge_networks": "Merge DB and BVG stations",
           "scan_interval": "Departure refresh interval",
           "fallback": "Use a public DBF instance while yours is unreachable",
           "fallback_url": "Public DBF instance"
@@ -23,6 +24,7 @@
           "sources": "DB uses DBF's built-in station list (DB InfraGO). Other entries are HAFAS services, e.g. BVG for Berlin buses, trams and U-Bahn.",
           "departures": "Set to 0 to show stops only, without departures.",
           "merge_duplicates": "Show one stop when several nearby stops have exactly the same departures, as BVG lists some stations several times (e.g. Alexanderplatz).",
+          "merge_networks": "Show a DB station and the BVG S-/U-Bahn stop of the same station as one stop, e.g. Berlin Savignyplatz and S Savignyplatz. Its departures show all BVG lines plus the DB lines BVG doesn't list, such as regional trains.",
           "fallback": "Off by default. The public instance runs stock DBF: it allows about 10 requests per minute, so only the nearest 3 stops keep updating, and it has no stop search and no coordinates for BVG stops. Your server is retried every minute and used again as soon as it answers.",
           "fallback_url": "Only used when the option above is on."
         }
@@ -50,6 +52,7 @@
           "max_stops": "Maximum number of stops",
           "departures": "Departures per stop",
           "merge_duplicates": "Merge duplicate stops",
+          "merge_networks": "Merge DB and BVG stations",
           "scan_interval": "Departure refresh interval",
           "fallback": "Use a public DBF instance while yours is unreachable",
           "fallback_url": "Public DBF instance"
@@ -58,6 +61,7 @@
           "sources": "DB uses DBF's built-in station list (DB InfraGO). Other entries are HAFAS services, e.g. BVG for Berlin buses, trams and U-Bahn.",
           "departures": "Set to 0 to show stops only, without departures.",
           "merge_duplicates": "Show one stop when several nearby stops have exactly the same departures, as BVG lists some stations several times (e.g. Alexanderplatz).",
+          "merge_networks": "Show a DB station and the BVG S-/U-Bahn stop of the same station as one stop, e.g. Berlin Savignyplatz and S Savignyplatz. Its departures show all BVG lines plus the DB lines BVG doesn't list, such as regional trains.",
           "fallback": "Off by default. The public instance runs stock DBF: it allows about 10 requests per minute, so only the nearest 3 stops keep updating, and it has no stop search and no coordinates for BVG stops. Your server is retried every minute and used again as soon as it answers.",
           "fallback_url": "Only used when the option above is on."
         }

@@ -304,7 +304,7 @@
             aria-selected="${index === this._active}">
             ${stop.entity_picture ? `<img src="${esc(stop.entity_picture)}" alt="">` : "<span></span>"}
             <div class="name">${esc(stop.name)}</div>
-            <div class="meta">${esc(distance)}<span class="net">${esc(stop.network)}</span></div>
+            <div class="meta">${esc(distance)}<span class="net">${esc(stop.networks?.length > 1 ? stop.networks.join(" + ") : stop.network)}</span></div>
           </li>`;
       });
       results.innerHTML = `
