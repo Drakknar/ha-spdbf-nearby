@@ -33,6 +33,7 @@
 
   const TICK_MS = 30000; // keeps "in N min" current between sensor updates
   const RIDE_REFRESH_MS = 10 * 60000; // scheduled ride times hardly change
+  const RIDE_TYPING_MS = 1000; // in the editor, look up once typing pauses
   const DEFAULT_DEPARTURES = 6;
 
   const STYLE = `
@@ -333,10 +334,12 @@
         this.attachShadow({ mode: "open" });
         this.shadowRoot.addEventListener("click", (ev) => this._onClick(ev));
       }
-      // In the editor the ride follows the options as they change.
+      // In the editor the ride follows the options as they change, once
+      // typing (e.g. a station name) pauses.
       if (this._hass) {
         this._state = this._hass.states[this._config.entity];
-        this._updateRide();
+        clearTimeout(this._rideTimer);
+        this._rideTimer = setTimeout(() => this._updateRide(), RIDE_TYPING_MS);
       }
       this._render();
     }
@@ -358,6 +361,7 @@
 
     disconnectedCallback() {
       clearInterval(this._timer);
+      clearTimeout(this._rideTimer);
     }
 
     getCardSize() {
@@ -429,7 +433,9 @@
         end = this._stop();
         rows = sensorRows(from);
       }
-      const lines = unique(rows.map(({ line }) => line));
+      // Sorted, so the next train changing doesn't start a new lookup.
+      const lines = unique(rows.map(({ line }) => line))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
       const key = JSON.stringify([start.eva, end.eva, end.name, lines]);
       if (this._ride && this._ride.key === key && Date.now() - this._ride.time < RIDE_REFRESH_MS) return;
       this._ride = { key, time: Date.now(), result: this._ride?.key === key ? this._ride.result : null };
