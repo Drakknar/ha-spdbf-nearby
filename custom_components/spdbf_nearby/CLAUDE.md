@@ -19,7 +19,7 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
 <repo root>/
   hacs.json, README.md              HACS metadata (min HA 2026.9.0) and user docs
   custom_components/spdbf_nearby/   <- this folder
-    __init__.py         Serves www/ as static files, injects both scripts on every page
+    __init__.py         Serves www/ as static files, injects spdbf-loader.js on every page
                         (add_extra_js_url), registers the WebSocket commands, creates the
                         DbfClient and the coordinator, and the geo_location platform if map stops are on
     dbf.py              Core: DbfClient talks to DBF (fast fail, public fallback, Repairs), reads
@@ -31,8 +31,10 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
     websocket_api.py    spdbf_nearby/search, /nearby, /board and /trip for the cards and the dialog
     geo_location.py     One SpdbfStop entity per stop; added and removed as the stop list changes
     config_flow.py      Setup and options flow
-    const.py            Settings, defaults, FRONTEND_VERSION, thresholds
+    const.py            Settings, defaults, FRONTEND_VERSION (= manifest version), thresholds
     www/
+      spdbf-loader.js           The only extra module: imports the three files below, retrying
+                                until they load
       dbf-core.js               Frontend core, window.dbfCore: tidyLine, lineKey, lineStyle (line
                                 colours), showStop (departure dialog), showTrip; also replaces
                                 more-info for stop entities (window.spdbfShowStop: old name)
@@ -160,7 +162,10 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
   - **Searching:** 2+ characters search after 300 ms. With an empty field, focusing it lists nearby stops; that list is reused for a minute.
   - **Location:** the browser's location (needs HTTPS and permission, 5 s timeout), else the tracked entity.
   - **Options:** `placeholder`, `use_device_location`, `entry_id`.
-  - **Bump `FRONTEND_VERSION` in `const.py` whenever anything in `www/` changes.** It is the cache-busting query string, and without it browsers and the companion app keep the old file.
+  - **Cache busting:** `FRONTEND_VERSION` (the `?v=` query string) is read from `manifest.json`, so every release makes browsers and the companion app fetch the new files. Until 0.7.3 it was a hand-bumped constant and stayed at 0.6.1 through 0.7.0–0.7.2, so the app could keep running the 0.6.1 cards.
+- **Loader (`www/spdbf-loader.js`, since 0.7.3):** the only `add_extra_js_url` module. It imports `dbf-core.js` and both cards in parallel and retries each failed import after 2, 5, 15, 30, then every 60 s, and right away on `online` or when the page becomes visible. A retry adds `&retry=N`, since a browser may keep a failed module import for the page's lifetime; the files' own guards (`window.dbfCore`, `customElements.get`) make loading twice harmless.
+  - **Why (owner, 2026-10-16):** in the companion app, the connection and search cards often stayed "Configuration error" ("Custom element doesn't exist" in edit mode) until the app reloaded, while headings were fine. Home Assistant imports extra modules once when the page opens, with no retry; if that fetch fails (app opening before network/VPN is up), the elements are never defined. Lovelace resources don't have this, as they load after the connection. HA's `_customCreate` (frontend `create-element-base.ts`) shows the error after 2 s and rebuilds the card on `customElements.whenDefined`, so a late successful load fixes the cards without a reload.
+  - **Checked 2026-10-16** in a Node fake-DOM test: failed imports retried on timer, `online` and `visibilitychange`; all three loaded; a second run does nothing; no listeners left.
 
 ## Findings
 
@@ -213,7 +218,7 @@ There are **no automated tests** yet. What has been done for changes so far:
   - **Check:** the card's nearby list and search, the dialog's grouping at Alexanderplatz, and merged markers on the map.
   - **Companion app:** whether the browser location works in the companion app's WebView. If it doesn't, the card falls back to the tracked person.
 
-- **Mobile tap shows entity details (reported 2026-10-10, unresolved):** in the Android companion app, tapping a stop on the map opened Home Assistant's entity dialog instead of the departures. The installed files matched the repository. Most likely cause: the app's cached frontend never loaded the departure dialog script (now `dbf-core.js`). First step: reset the app's frontend cache and retry. If it persists, check in the app's WebView whether `window.dbfCore` is set and the console shows "spdbf Nearby Stops: frontend core active".
+- **Mobile tap shows entity details (reported 2026-10-10; likely fixed by the 0.7.3 loader):** in the Android companion app, tapping a stop on the map opened Home Assistant's entity dialog instead of the departures. The installed files matched the repository. Most likely cause: the app's cached frontend never loaded the departure dialog script (now `dbf-core.js`). First step: reset the app's frontend cache and retry. If it persists, check in the app's WebView whether `window.dbfCore` is set and the console shows "spdbf Nearby Stops: frontend core active".
 - **Idea, discussed and not wanted for now:** loading stops for the area the map is showing, instead of around the person. That would mean hooking into `ha-map`'s private engine, which can break with any HA update. It would use temporary markers rather than entities, so one viewer's panning doesn't move everyone's stops.
 - **Possible improvements:** pytest tests with a fake DBF server (as in `ha-audiocpp`), diagnostics, translations other than English.
 
@@ -224,7 +229,7 @@ The author's Home Assistant installs this integration through HACS (custom repos
 - **Releases (since 0.3.0):** each version is a GitHub release tagged `vX.Y.Z`, matching `version` in `manifest.json`. HACS then shows the version and release notes, and offers only releases as updates.
   - **Before 0.3.0** there were no releases. HACS tracked `main` and showed commit hashes; installed was `5cc072e`.
 - **To release:**
-  1. Bump `version` in `manifest.json`, and `FRONTEND_VERSION` in `const.py` if `www/` changed.
+  1. Bump `version` in `manifest.json` (`FRONTEND_VERSION` follows it).
   2. Merge to `main`.
   3. `.github/workflows/release.yml` (since 2026-10-14) publishes `vX.Y.Z` on its own. It runs when `manifest.json` changes on `main`, skips a version that already has a release, and writes notes from the merged pull requests. Edit the notes on GitHub if they need more.
 - **Compatibility fixes:** the review prompt tells Claude to bump the patch version whenever it changes integration code. Merging its pull request therefore publishes the fix.

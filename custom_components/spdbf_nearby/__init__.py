@@ -37,10 +37,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     )
     # Loaded on every page, so stops show departures wherever they are opened,
     # cards work without adding a dashboard resource, and other cards can use
-    # window.dbfCore.
-    add_extra_js_url(hass, f"{STATIC_URL}/dbf-core.js?v={FRONTEND_VERSION}")
-    add_extra_js_url(hass, f"{STATIC_URL}/spdbf-stop-search-card.js?v={FRONTEND_VERSION}")
-    add_extra_js_url(hass, f"{STATIC_URL}/spdbf-connection-card.js?v={FRONTEND_VERSION}")
+    # window.dbfCore. The loader imports the core and the cards, retrying
+    # until they load (see www/spdbf-loader.js).
+    add_extra_js_url(hass, f"{STATIC_URL}/spdbf-loader.js?v={FRONTEND_VERSION}")
     websocket_api.async_register(hass)
     return True
 
