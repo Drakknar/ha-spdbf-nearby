@@ -1,10 +1,12 @@
 // spdbf Nearby Stops: a dashboard card for one connection you use, from a
 // db_infoscreen sensor. It uses the frontend core (dbf-core.js) for line
 // names and colours, and for the departure dialog: tapping a departure opens
-// its trip, tapping the title the stop's full board. A link row joins it to
-// the card before, for changing trains: "↓ 15 min ride · 4 min walk". The
-// ride is timed on the previous card's lines (S-Bahn to S-Bahn, bus to bus),
-// so it ends where that train arrives; the walk is the change from there.
+// its trip, tapping the title the stop's full board. A link row under the
+// card leads to the next leg, for changing trains: "↓ 15 min ride · 4 min
+// walk". The ride is timed on this card's lines (S-Bahn to S-Bahn, bus to
+// bus), so it ends where that train arrives; the walk is the change from
+// there. The last leg can instead ride to a station on its line, typed by
+// name: "↓ 6 min ride to Senefelderplatz · 4 min walk".
 // Loaded on every page by the integration (through spdbf-loader.js), so no
 // dashboard resource is needed.
 //
@@ -16,23 +18,29 @@
 //   lines: [S41]
 //   destinations: [Pankow]           #   (part of the destination is enough)
 //   hide_destinations: [Staaken]     #   hides these; one ending early still shows
-//   ride_from: sensor.db_infoscreen_berlin_savignyplatz_departures
-//                                    # optional: the previous card's sensor
-//   walk_minutes: 4                  # optional walk from the previous card
+//   ride_to: sensor.db_infoscreen_berlin_alexanderplatz_departures
+//                                    # optional: the next card's sensor
+//   ride_to_station: Senefelderplatz # optional, or a station on this line
+//   walk_minutes: 4                  # optional walk after the ride
 //   show_ride: true                  # optional, turn either part off
 //   show_walk: true
+//
+// Before 0.8.0 the row sat above the second card (ride_from: the previous
+// card's sensor); a card with ride_from and neither ride_to option still
+// shows it that way.
 (() => {
   if (customElements.get("spdbf-connection-card")) return;
 
   const TICK_MS = 30000; // keeps "in N min" current between sensor updates
   const RIDE_REFRESH_MS = 10 * 60000; // scheduled ride times hardly change
+  const RIDE_TYPING_MS = 1000; // in the editor, look up once typing pauses
   const DEFAULT_DEPARTURES = 6;
 
   const STYLE = `
     :host { display: block; }
     ha-card { overflow: hidden; }
     .walk {
-      display: flex; align-items: center; gap: 8px; padding: 8px 16px 0;
+      display: flex; align-items: center; gap: 8px; padding: 8px 16px;
       color: var(--secondary-text-color, #727272); font-size: 13px;
     }
     .walk ha-icon { --mdc-icon-size: 18px; }
@@ -82,13 +90,17 @@
       "Hide these destinations",
       "For stops without platforms (buses): hide the other direction's last stops, so a bus ending early in your direction still shows.",
     ],
-    ride_from: [
-      "Ride from (the previous card's sensor)",
-      "Shows the ride time from that station, on its lines, to this one.",
+    ride_to: [
+      "Ride to (the next card's sensor)",
+      "Shows under this card the ride time on its lines to that station.",
+    ],
+    ride_to_station: [
+      "Or ride to a station on this line",
+      "For the last leg: the station's name, e.g. where you get off. Used when \"Ride to\" is empty.",
     ],
     walk_minutes: [
-      "Walk from the previous card (minutes)",
-      "The change from where the previous train arrives to this card's platform.",
+      "Walk after the ride (minutes)",
+      "From where the train arrives to the next card's platform, or on from the station.",
     ],
     show_ride: ["Show ride time", ""],
     show_walk: ["Show walk time", ""],
@@ -228,7 +240,8 @@
         pick("lines", byKey(onPlatforms, ({ line }) => line), (line, grouped) => routes(grouped)),
         pick("destinations", byKey(onLines, destinationOf), destinationLabel),
         pick("hide_destinations", byKey(onLines, destinationOf), destinationLabel),
-        { name: "ride_from", selector: { entity: { domain: "sensor", integration: "db_infoscreen" } } },
+        { name: "ride_to", selector: { entity: { domain: "sensor", integration: "db_infoscreen" } } },
+        { name: "ride_to_station", selector: { text: {} } },
         { name: "walk_minutes", selector: { number: { min: 0, max: 60, mode: "box", unit_of_measurement: "min" } } },
         {
           type: "grid",
@@ -321,6 +334,13 @@
         this.attachShadow({ mode: "open" });
         this.shadowRoot.addEventListener("click", (ev) => this._onClick(ev));
       }
+      // In the editor the ride follows the options as they change, once
+      // typing (e.g. a station name) pauses.
+      if (this._hass) {
+        this._state = this._hass.states[this._config.entity];
+        clearTimeout(this._rideTimer);
+        this._rideTimer = setTimeout(() => this._updateRide(), RIDE_TYPING_MS);
+      }
       this._render();
     }
 
@@ -341,6 +361,7 @@
 
     disconnectedCallback() {
       clearInterval(this._timer);
+      clearTimeout(this._rideTimer);
     }
 
     getCardSize() {
@@ -376,23 +397,51 @@
       return { name, eva: station, network, colors: "berlin" };
     }
 
-    // The ride from the previous card's station, on that sensor's lines, so an
-    // S-Bahn leg is timed S-Bahn to S-Bahn. Looked up now and then; the
+    // Where the link row leads: below the card to the next card's station or
+    // to a station typed in, or (before 0.8.0) above it from the previous card.
+    _link() {
+      const config = this._config;
+      const station = String(config.ride_to_station ?? "").trim();
+      if (config.ride_to || station) return { below: true, to: config.ride_to, station };
+      if (config.ride_from) return { below: false, from: config.ride_from };
+      return null;
+    }
+
+    // The ride on the leg's lines, so an S-Bahn leg is timed S-Bahn to
+    // S-Bahn. Leaving from this card, those are the lines it shows (all the
+    // sensor's if its filters match none now). Looked up now and then; the
     // card renders without it until it arrives.
     _updateRide() {
       const config = this._config;
-      const from = config.ride_from && this._hass?.states[config.ride_from];
-      if (!from || !this._state || config.show_ride === false || !core()?.ride) return;
-      const lines = [...new Set((from.attributes?.next_departures ?? [])
-        .map((dep) => tidy(dep.train, dep.trainNumber)).filter(Boolean))];
-      const start = this._stop(from, "");
-      const end = this._stop();
-      const key = JSON.stringify([start.eva, end.eva, lines]);
+      const link = this._link();
+      if (!link || !this._state || config.show_ride === false || !core()?.ride) return;
+      let start;
+      let end;
+      let rows;
+      if (link.below) {
+        const next = link.to && this._hass?.states[link.to];
+        if (link.to && !next) return;
+        start = this._stop();
+        end = next ? this._stop(next, "") : { eva: "", name: link.station };
+        const all = sensorRows(this._state);
+        rows = all.filter(departureFilter(config));
+        if (!rows.length) rows = all;
+      } else {
+        const from = this._hass?.states[link.from];
+        if (!from) return;
+        start = this._stop(from, "");
+        end = this._stop();
+        rows = sensorRows(from);
+      }
+      // Sorted, so the next train changing doesn't start a new lookup.
+      const lines = unique(rows.map(({ line }) => line))
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      const key = JSON.stringify([start.eva, end.eva, end.name, lines]);
       if (this._ride && this._ride.key === key && Date.now() - this._ride.time < RIDE_REFRESH_MS) return;
       this._ride = { key, time: Date.now(), result: this._ride?.key === key ? this._ride.result : null };
       core().ride(
         { eva: start.eva, name: start.name, network: start.network },
-        { eva: end.eva, name: end.name },
+        end.eva ? { eva: end.eva, name: end.name } : { name: end.name },
         lines,
       ).then((result) => {
         if (this._ride?.key !== key) return;
@@ -401,12 +450,13 @@
       }).catch(() => {});
     }
 
-    _linkRow() {
+    _linkRow(link) {
       const config = this._config;
       const parts = [];
       const ride = this._ride?.result;
       if (config.show_ride !== false && ride?.minutes != null) {
-        parts.push(`<ha-icon icon="mdi:train"></ha-icon>${esc(ride.minutes)} min ride`);
+        const to = link?.below && !link.to && link.station ? ` to ${esc(link.station)}` : "";
+        parts.push(`<ha-icon icon="mdi:train"></ha-icon>${esc(ride.minutes)} min ride${to}`);
       }
       if (config.show_walk !== false && Number(config.walk_minutes) > 0) {
         parts.push(`<ha-icon icon="mdi:walk"></ha-icon>${esc(config.walk_minutes)} min walk`);
@@ -481,7 +531,8 @@
       const attrs = this._state?.attributes ?? {};
       const title = config.title || attrs.station || attrs.friendly_name || config.entity;
       const icon = config.icon || attrs.icon || "mdi:train";
-      const walk = this._linkRow();
+      const link = this._link();
+      const walk = this._linkRow(link);
       // Berlin S- and U-Bahn colours, as on BVG stops.
       const network = "BVG";
       let body;
@@ -494,12 +545,13 @@
           : `<div class="empty">No departures right now.</div>`;
       }
       this.shadowRoot.innerHTML = `<style>${STYLE}</style>
-        ${walk}
+        ${link?.below ? "" : walk}
         <ha-card>
           <header title="Show all departures"><ha-icon icon="${esc(icon)}"></ha-icon>
             <span class="title">${esc(title)}</span></header>
           ${body}
-        </ha-card>`;
+        </ha-card>
+        ${link?.below ? walk : ""}`;
     }
   }
 
@@ -508,7 +560,7 @@
   window.customCards.push({
     type: "spdbf-connection-card",
     name: "spdbf connection",
-    description: "Departures of a connection you use (db_infoscreen sensor), with the ride and walk from the previous card.",
+    description: "Departures of a connection you use (db_infoscreen sensor), with the ride and walk to the next card or station.",
     preview: true,
     documentationURL: "https://github.com/Drakknar/ha-spdbf-nearby#connection-card",
   });

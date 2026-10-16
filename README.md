@@ -103,9 +103,11 @@ For the connections you use: one card per stop, from a [db_infoscreen](https://g
 - **Departures** with line colours (Berlin S- and U-Bahn), platform, minutes, delay and cancellations, the same look as the departure dialog.
 - **Tap a departure** for its trip, or the title for the stop's full board.
 - **Filters that stay right:** in the editor, pick a platform from a list that shows the lines and destinations stopping there (the platform is the direction). Lines and destinations are suggested from what the sensor has now. A check at the top says what the card would show, and warns about a filter that matches nothing, e.g. a destination the line doesn't reach tonight because it turns back early. Prefer platform and line over destination: lines often end early, and a destination filter then empties the card. At stops without platforms (most bus stops), hide the other direction's destinations instead: a bus that ends early in your direction still shows.
-- **Changing trains:** a row at the top links the card to the one before, e.g. "↓ 15 min ride · 4 min walk". Each part can be turned off.
-  - **Ride:** set "Ride from" to the previous card's sensor. The ride is timed on that sensor's lines (S-Bahn to S-Bahn, bus to bus), so it ends where that train arrives. It comes from BVG trip data, which needs the patched DBF image; DB's data has no reliable per-stop times for S-Bahn trains.
-  - **Walk:** the minutes you enter for the change, from where that train arrives to this card's platform.
+- **Changing trains:** a row under the card leads to the next leg, e.g. "↓ 15 min ride · 4 min walk". Each part can be turned off.
+  - **Ride:** set "Ride to" to the next card's sensor. The ride is timed on this card's lines (S-Bahn to S-Bahn, bus to bus), so it ends where that train arrives. It comes from BVG trip data, which needs the patched DBF image; DB's data has no reliable per-stop times for S-Bahn trains.
+  - **Last leg:** instead, type a station on the line into "Or ride to a station", e.g. where you get off: "↓ 6 min ride to S Schönhauser Allee · 10 min walk". The name is matched without the S/U prefix and the town in brackets; write the mode as a prefix ("U Schönhauser Allee").
+  - **Walk:** the minutes you enter after the ride: the change to the next card's platform, or on from the station.
+  - **Before 0.8.0** the row sat above the second card (`ride_from`, the previous card's sensor). That still works on a card without `ride_to` or `ride_to_station`.
 
 ```yaml
 type: custom:spdbf-connection-card
@@ -116,8 +118,9 @@ platforms: ["11"]       # optional: "2" also matches BVG's "2 (U2)"
 lines: [S41]            # optional: only these lines
 destinations: [Pankow]  # optional: part of the destination is enough
 hide_destinations: [Staaken]  # optional: hide these; for stops without platforms
-ride_from: sensor.db_infoscreen_berlin_savignyplatz_departures  # optional
-walk_minutes: 4         # optional
+ride_to: sensor.db_infoscreen_berlin_alexanderplatz_departures  # optional: the next card
+ride_to_station: U Schönhauser Allee  # optional, for the last leg instead
+walk_minutes: 4         # optional: walk after the ride
 show_ride: true         # optional
 show_walk: true         # optional
 ```
