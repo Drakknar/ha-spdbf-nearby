@@ -1,4 +1,4 @@
-// spdbf Nearby Stops: loads the frontend core and the cards, and keeps
+// spdbf Public Transport: loads the frontend core and the cards, and keeps
 // retrying until they load. The integration registers only this file with
 // add_extra_js_url.
 //
@@ -23,7 +23,7 @@
     url.searchParams.set("v", version);
     if (attempt) url.searchParams.set("retry", String(attempt));
     return import(url.href).catch((err) => {
-      console.warn(`spdbf Nearby Stops: couldn't load ${file}, retrying`, err);
+      console.warn(`spdbf Public Transport: couldn't load ${file}, retrying`, err);
       return new Promise((resolve) => {
         const again = () => {
           clearTimeout(timer);

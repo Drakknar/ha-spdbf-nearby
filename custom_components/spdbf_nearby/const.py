@@ -1,4 +1,4 @@
-"""Constants for spdbf Nearby Stops."""
+"""Constants for spdbf Public Transport."""
 
 from datetime import timedelta
 import json

@@ -1,6 +1,6 @@
 {
   "domain": "spdbf_nearby",
-  "name": "spdbf Nearby Stops",
+  "name": "spdbf Public Transport",
   "codeowners": ["@Drakknar"],
   "config_flow": true,
   "dependencies": ["frontend", "http", "websocket_api"],
@@ -9,5 +9,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/Drakknar/ha-spdbf-nearby/issues",
   "requirements": [],
-  "version": "0.8.0"
+  "version": "0.8.1"
 }

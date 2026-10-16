@@ -535,5 +535,5 @@
     show(fromEntity(state), id);
   }, true);
 
-  console.info("spdbf Nearby Stops: frontend core active");
+  console.info("spdbf Public Transport: frontend core active");
 })();

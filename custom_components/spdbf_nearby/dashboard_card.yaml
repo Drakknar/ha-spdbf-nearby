@@ -1,4 +1,4 @@
-# Example dashboard cards for spdbf Nearby Stops.
+# Example dashboard cards for spdbf Public Transport.
 # Dashboard → Edit → Add card → Manual, then paste one card at a time.
 
 # 1. Map: follows the HA light/dark setting, shows you and the stops around you.
