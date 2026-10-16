@@ -39,10 +39,12 @@
   const STYLE = `
     :host { display: block; }
     ha-card { overflow: hidden; }
+    /* One line; on a narrow screen it breaks only between the parts. */
     .walk {
-      display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding: 8px 16px;
       color: var(--secondary-text-color, #727272); font-size: 13px;
     }
+    .walk .part { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
     .walk ha-icon { --mdc-icon-size: 18px; }
     header {
       display: flex; align-items: center; gap: 8px; padding: 12px 16px 4px; cursor: pointer;
@@ -456,12 +458,12 @@
       const ride = this._ride?.result;
       if (config.show_ride !== false && ride?.minutes != null) {
         const to = link?.below && !link.to && link.station ? ` to ${esc(link.station)}` : "";
-        parts.push(`<ha-icon icon="mdi:train"></ha-icon>${esc(ride.minutes)} min ride${to}`);
+        parts.push(`<span class="part"><ha-icon icon="mdi:train"></ha-icon>${esc(ride.minutes)} min ride${to}</span>`);
       }
       if (config.show_walk !== false && Number(config.walk_minutes) > 0) {
-        parts.push(`<ha-icon icon="mdi:walk"></ha-icon>${esc(config.walk_minutes)} min walk`);
+        parts.push(`<span class="part"><ha-icon icon="mdi:walk"></ha-icon>${esc(config.walk_minutes)} min walk</span>`);
       }
-      return parts.length ? `<div class="walk">↓ ${parts.join(" · ")}</div>` : "";
+      return parts.length ? `<div class="walk"><span>↓</span>${parts.join("<span>·</span>")}</div>` : "";
     }
 
     _departures() {
