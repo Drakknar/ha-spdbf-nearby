@@ -1,12 +1,25 @@
-# spdbf Nearby Stops for Home Assistant
+# spdbf Public Transport for Home Assistant
 
-Show public transport stops near you on the Home Assistant map, with live departures, using your own [DBF](https://github.com/derf/db-fakedisplay) (db-fakedisplay) server.
+Live public transport in Home Assistant, from your own [DBF](https://github.com/derf/db-fakedisplay) (db-fakedisplay) server: stops near you on the map, a stop search, cards for the connections you use with ride and walk times, and trip details. DB and BVG by default.
+
+**Your connections**
+
+- **A card per leg of your trip.** Departures of a [db_infoscreen](https://github.com/FaserF/ha-db_infoscreen) sensor with line colours, platforms, delays and cancellations, filtered to your platform and line. See [Connection card](#connection-card).
+- **Ride and walk times between legs.** "↓ 15 min ride · 4 min walk" under each leg, and for the last one the ride to where you get off.
+
+**Stops near you and any stop**
 
 - **Stops follow you.** Stops around a person or device tracker appear on the map and update as you move.
 - **Train or bus at a glance.** Map markers show a train for DB stations and S-/U-Bahn stops, a bus for BVG stops, and a generic stop icon for other networks.
-- **Tap a stop for its departures.** The dialog loads the stop's full board, grouped by line and destination ("U2 → Pankow: 2 · 7 · 12 min"), or sorted by time if you prefer. You get platforms, delays and cancellations, plus a link to the DBF board. This works on the Map panel, on any map card, from entity search and from the stop search card. It follows your theme, including light/dark mode.
 - **Search any stop.** A dashboard card finds DB and BVG stops by name. Tap the empty field to list the stops near you.
+
+**Departures and trips**
+
+- **Tap a stop for its departures.** The dialog loads the stop's full board, grouped by line and destination ("U2 → Pankow: 2 · 7 · 12 min"), or sorted by time if you prefer. You get platforms, delays and cancellations, plus a link to the DBF board. This works on the Map panel, on any map card, from entity search, the stop search card and the connection cards. It follows your theme, including light/dark mode.
 - **Follow a trip.** Tap a departure to see its stops and times, with delays and disruption notices, from DBF.
+
+**Stations**
+
 - **One marker per station.** BVG lists some stations several times (Alexanderplatz has a stop for each exit and bus bay, all with the same board). Stops with identical departures are merged into one.
 - **DB and BVG together.** A DB station and the BVG S-/U-Bahn stop of the same station, such as Berlin Savignyplatz and S Savignyplatz, are one marker. It shows every BVG line plus the DB lines BVG doesn't list, such as regional and long-distance trains.
 - **DB + BVG by default.** Any HAFAS network that DBF supports can be added.
@@ -18,6 +31,7 @@ Show public transport stops near you on the Home Assistant map, with live depart
 - A DBF server that Home Assistant can reach.
 - **For BVG and other HAFAS stops on the map, and for the stop search:** the patched image [`ghcr.io/drakknar/db-fakedisplay`](https://github.com/Drakknar/db-fakedisplay-patched). Upstream DBF doesn't send coordinates for HAFAS stops and can't search stops by name as JSON. With an unpatched server, only DB stops appear on the map, Home Assistant shows a Repairs notice explaining why, and the search card says it needs the patched image.
 - **For your location:** a person or device tracker with GPS, such as the Home Assistant companion app.
+- **For the connection cards:** [db_infoscreen](https://github.com/FaserF/ha-db_infoscreen) departure sensors for your stops. Their ride times also need the patched image (BVG trip data).
 
 ## Installation
 
@@ -25,7 +39,7 @@ Show public transport stops near you on the Home Assistant map, with live depart
 
 1. HACS → ⋮ → **Custom repositories**.
 2. Add `https://github.com/Drakknar/ha-spdbf-nearby` as type **Integration**.
-3. Install **spdbf Nearby Stops**, then restart Home Assistant.
+3. Install **spdbf Public Transport**, then restart Home Assistant.
 
 Updates are published as [releases](https://github.com/Drakknar/ha-spdbf-nearby/releases), which HACS offers as they appear.
 
@@ -37,7 +51,7 @@ After installing or updating, reload the Home Assistant page or companion app on
 
 ## Setup
 
-**Settings → Devices & services → Add integration → spdbf Nearby Stops.**
+**Settings → Devices & services → Add integration → spdbf Public Transport.**
 
 | Setting | Default | What it does |
 |---|---|---|

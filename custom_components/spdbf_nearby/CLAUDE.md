@@ -220,9 +220,13 @@ There are **no automated tests** yet. What has been done for changes so far:
   - **Check:** the card's nearby list and search, the dialog's grouping at Alexanderplatz, and merged markers on the map.
   - **Companion app:** whether the browser location works in the companion app's WebView. If it doesn't, the card falls back to the tracked person.
 
-- **Mobile tap shows entity details (reported 2026-10-10; likely fixed by the 0.7.3 loader):** in the Android companion app, tapping a stop on the map opened Home Assistant's entity dialog instead of the departures. The installed files matched the repository. Most likely cause: the app's cached frontend never loaded the departure dialog script (now `dbf-core.js`). First step: reset the app's frontend cache and retry. If it persists, check in the app's WebView whether `window.dbfCore` is set and the console shows "spdbf Nearby Stops: frontend core active".
+- **Mobile tap shows entity details (reported 2026-10-10; likely fixed by the 0.7.3 loader):** in the Android companion app, tapping a stop on the map opened Home Assistant's entity dialog instead of the departures. The installed files matched the repository. Most likely cause: the app's cached frontend never loaded the departure dialog script (now `dbf-core.js`). First step: reset the app's frontend cache and retry. If it persists, check in the app's WebView whether `window.dbfCore` is set and the console shows "spdbf Public Transport: frontend core active".
 - **Idea, discussed and not wanted for now:** loading stops for the area the map is showing, instead of around the person. That would mean hooking into `ha-map`'s private engine, which can break with any HA update. It would use temporary markers rather than entities, so one viewer's panning doesn't move everyone's stops.
 - **Possible improvements:** pytest tests with a fake DBF server (as in `ha-audiocpp`), diagnostics, translations other than English.
+
+## Name
+
+Shown as **spdbf Public Transport** since 0.8.1 (owner's choice, 2026-10-16): "Nearby Stops" no longer covered the stop search, connection cards and trips. Only the display name changed. The domain `spdbf_nearby`, the `custom:spdbf-*` card types and the repository name stay, because renaming them breaks entities, dashboards and the HACS custom repository entry.
 
 ## Releases and HACS
 

@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "spdbf Nearby Stops",
+        "title": "spdbf Public Transport",
         "description": "Show public transport stops near a person on the map, using your own DBF (spdbf) server.",
         "data": {
           "server_url": "Server URL (used by Home Assistant)",
@@ -44,7 +44,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "spdbf Nearby Stops",
+        "title": "spdbf Public Transport",
         "data": {
           "server_url": "Server URL (used by Home Assistant)",
           "public_url": "Public URL (for links to departure boards)",
@@ -84,7 +84,7 @@
     },
     "server_unreachable": {
       "title": "Your DBF server isn't reachable",
-      "description": "spdbf Nearby Stops couldn't reach the DBF server at {server} for several minutes ({reason}). It retries every minute.\n\n{fallback}\n\nCheck that the db-fakedisplay container is running. This notice disappears by itself once the server answers again."
+      "description": "spdbf Public Transport couldn't reach the DBF server at {server} for several minutes ({reason}). It retries every minute.\n\n{fallback}\n\nCheck that the db-fakedisplay container is running. This notice disappears by itself once the server answers again."
     }
   }
 }

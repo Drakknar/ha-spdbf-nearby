@@ -235,7 +235,7 @@
     const delay = dep.delay ? `<span class="late"> +${esc(dep.delay)}</span>` : "";
     const when = dep.cancelled
       ? `<div class="min">cancelled</div><small>${esc(dep.scheduled)}</small>`
-      : `<div class="min">${minutes === 0 ? "now" : `${minutes} min`}</div><small>${esc(dep.scheduled)}${delay}</small>`;
+      : `<div class="min${dep.delay > 0 ? " late" : ""}">${minutes === 0 ? "now" : `${minutes} min`}</div><small>${esc(dep.scheduled)}${delay}</small>`;
     const platform = dep.platform ? `<small>Platform ${esc(dep.platform)}</small>` : "";
     const classes = [dep.cancelled && "cancelled", dep.trip && "clickable"].filter(Boolean).join(" ");
     return `
@@ -535,5 +535,5 @@
     show(fromEntity(state), id);
   }, true);
 
-  console.info("spdbf Nearby Stops: frontend core active");
+  console.info("spdbf Public Transport: frontend core active");
 })();

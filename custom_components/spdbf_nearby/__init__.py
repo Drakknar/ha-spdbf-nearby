@@ -45,7 +45,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: SpdbfConfigEntry) -> bool:
-    """Set up spdbf Nearby Stops from a config entry."""
+    """Set up spdbf Public Transport from a config entry."""
     client = DbfClient(hass, {**entry.data, **entry.options}, entry.entry_id)
     coordinator = SpdbfCoordinator(hass, entry, client)
     await coordinator.async_config_entry_first_refresh()

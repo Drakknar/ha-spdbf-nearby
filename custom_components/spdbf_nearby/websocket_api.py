@@ -48,11 +48,11 @@ def _coordinator(
             connection.send_error(
                 msg["id"],
                 "not_ready",
-                "spdbf Nearby Stops isn't ready yet and keeps retrying: "
+                "spdbf Public Transport isn't ready yet and keeps retrying: "
                 f"{retrying[0].reason or 'DBF server unreachable'}",
             )
         else:
-            connection.send_error(msg["id"], "not_found", "spdbf Nearby Stops is not set up")
+            connection.send_error(msg["id"], "not_found", "spdbf Public Transport is not set up")
         return None
     user_id = connection.user.id if connection.user else None
     for entry in entries:

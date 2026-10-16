@@ -1,4 +1,4 @@
-// spdbf Nearby Stops: a dashboard card to find a stop by name (DB, BVG and
+// spdbf Public Transport: a dashboard card to find a stop by name (DB, BVG and
 // the other configured sources). Focusing the empty field lists the stops
 // near you; picking a stop opens its departures (dbf-core.js).
 // Loaded on every page by the integration (through spdbf-loader.js), so no

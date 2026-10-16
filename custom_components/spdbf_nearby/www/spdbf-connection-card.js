@@ -1,4 +1,4 @@
-// spdbf Nearby Stops: a dashboard card for one connection you use, from a
+// spdbf Public Transport: a dashboard card for one connection you use, from a
 // db_infoscreen sensor. It uses the frontend core (dbf-core.js) for line
 // names and colours, and for the departure dialog: tapping a departure opens
 // its trip, tapping the title the stop's full board. A link row under the
@@ -521,7 +521,7 @@
         <li class="${classes}" data-index="${index}">
           <span class="line"${css}>${esc(line)}</span>
           <div class="dest"><div>${esc(dep.destination)}</div>${platform}</div>
-          <div class="when"><div class="min">${esc(main)}</div><small>${esc(scheduled)}${late}</small></div>
+          <div class="when"><div class="min${delay > 0 && !cancelled ? " late" : ""}">${esc(main)}</div><small>${esc(scheduled)}${late}</small></div>
         </li>`;
     }
 

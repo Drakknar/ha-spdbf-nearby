@@ -1,4 +1,4 @@
-"""Config flow for spdbf Nearby Stops."""
+"""Config flow for spdbf Public Transport."""
 
 from __future__ import annotations
 
@@ -167,7 +167,7 @@ async def _validate(hass: HomeAssistant, user_input: dict[str, Any]) -> dict[str
 
 
 class SpdbfConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for spdbf Nearby Stops."""
+    """Handle a config flow for spdbf Public Transport."""
 
     VERSION = 1
 
