@@ -27,7 +27,7 @@ Everything that comes from upstream (code, comments, commit messages, release no
    - **Other dependencies:** their release notes and the source diff of the parts this repository talks to.
 3. Run the repository against the new version, as "This repository" describes, and read the output for deprecation warnings. Put scratch work (clones, virtualenvs, downloads) under `$RUNNER_TEMP`, never inside the repository.
 4. Fix breakage, and deprecations that already warn. Keep the minimum Home Assistant version in `hacs.json` unless a fix needs a newer API; if you raise it, say so in the report. Don't weaken or remove tests to make them pass.
-   - **Version bump:** when you change anything under `custom_components/spdbf_nearby/` other than `CLAUDE.md`, raise the patch version in `manifest.json` (e.g. 0.4.0 → 0.4.1). Also bump `FRONTEND_VERSION` in `const.py` if `www/` changed.
+   - **Version bump:** when you change anything under `custom_components/spdbf_nearby/` other than `CLAUDE.md`, raise the patch version in `manifest.json` (e.g. 0.4.0 → 0.4.1). `FRONTEND_VERSION` in `const.py` follows it, so `www/` changes reach browsers too.
    - **Why:** HACS only offers releases, and merging the pull request publishes the new manifest version as a release (`.github/workflows/release.yml`). Without the bump, the fix never reaches Home Assistant.
 5. When you change files (status `fixed`), update CLAUDE.md where it records what was verified against which version, in its existing style. On `clear`, leave the working tree unchanged, CLAUDE.md included: your report is the record.
 6. **Improvements:** new features in the new version that would make this repository better for its users, for example:
@@ -67,7 +67,7 @@ Status:
     - `getGridOptions` in sections dashboards;
     - `ha-card` and `ha-icon`.
 
-  For a Home Assistant release, find the frontend version it ships and diff https://github.com/home-assistant/frontend between the two frontend tags for those files. If anything in `www/` changes, bump `FRONTEND_VERSION` in `const.py`.
+  For a Home Assistant release, find the frontend version it ships and diff https://github.com/home-assistant/frontend between the two frontend tags for those files. Also check that Home Assistant still loads `add_extra_js_url` modules as ES modules (`www/spdbf-loader.js` uses `import.meta.url` and dynamic `import()`).
 - **DBF:** `dbf.py` calls `POST /_geolocation` (`lat`, `lon`, `hafas`, or `q` for the name search), `GET /<eva>?mode=json&limit=…[&hafas=…]`, and for trips `GET /z/<tripId>.json?hafas=…` and `GET /z/<type> <number>/<eva>.json`. It reads the fields used in `dbf.py`.
   - **Trip ids:** `tripId` in HAFAS departures comes from the patched build (`hafas-trip-id.pl`).
   - **Name search:** `q=` exists only in the owner's patched build (`station-name-search.pl`); upstream answers it with an error.

@@ -1,6 +1,8 @@
 """Constants for spdbf Nearby Stops."""
 
 from datetime import timedelta
+import json
+from pathlib import Path
 
 DOMAIN = "spdbf_nearby"
 
@@ -39,10 +41,13 @@ HAFAS_SOURCES = [
     "KVB", "mobiliteit", "NAHSH", "NASA", "NVV", "PKP", "Resrobot", "RMV",
     "RSAG", "SaarVV", "STV", "TPG", "VBN", "VMT", "VOS", "ZVV",
 ]
-# Served from www/. Bump FRONTEND_VERSION when anything in www/ changes, so
-# browsers and the companion app fetch the new files.
+# Served from www/. FRONTEND_VERSION is the cache-busting query string: the
+# release version, so every release makes browsers and the companion app fetch
+# the new files (they cache them for 31 days).
 STATIC_URL = f"/{DOMAIN}"
-FRONTEND_VERSION = "0.6.1"
+FRONTEND_VERSION: str = json.loads(
+    (Path(__file__).parent / "manifest.json").read_text(encoding="utf-8")
+)["version"]
 # Map marker pictures. Names starting like this are S-/U-Bahn stations.
 RAIL_NAME_PREFIXES = ("S ", "U ", "S+U ")
 

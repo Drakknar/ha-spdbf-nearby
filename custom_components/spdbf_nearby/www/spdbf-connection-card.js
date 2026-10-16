@@ -5,7 +5,8 @@
 // the card before, for changing trains: "↓ 15 min ride · 4 min walk". The
 // ride is timed on the previous card's lines (S-Bahn to S-Bahn, bus to bus),
 // so it ends where that train arrives; the walk is the change from there.
-// Loaded on every page by the integration, so no dashboard resource is needed.
+// Loaded on every page by the integration (through spdbf-loader.js), so no
+// dashboard resource is needed.
 //
 //   type: custom:spdbf-connection-card
 //   entity: sensor.db_infoscreen_berlin_westkreuz_departures
