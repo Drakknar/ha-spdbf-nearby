@@ -521,7 +521,7 @@
         <li class="${classes}" data-index="${index}">
           <span class="line"${css}>${esc(line)}</span>
           <div class="dest"><div>${esc(dep.destination)}</div>${platform}</div>
-          <div class="when"><div class="min">${esc(main)}</div><small>${esc(scheduled)}${late}</small></div>
+          <div class="when"><div class="min${delay > 0 && !cancelled ? " late" : ""}">${esc(main)}</div><small>${esc(scheduled)}${late}</small></div>
         </li>`;
     }
 
