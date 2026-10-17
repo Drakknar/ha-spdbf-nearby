@@ -101,7 +101,7 @@
     .empty { padding: 16px 24px; color: var(--secondary-text-color, #727272); }
     li.clickable { cursor: pointer; }
     li.clickable:hover { background: var(--secondary-background-color, rgba(0, 0, 0, 0.04)); }
-    .trip-head { display: flex; align-items: center; gap: 8px; padding: 0 16px 8px; min-width: 0; }
+    .trip-head { display: flex; align-items: center; gap: 8px; padding: 0 24px 8px; min-width: 0; }
     .trip-head .dest { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     ul.trip li { grid-template-columns: 52px 1fr auto; padding: 8px 16px; }
     ul.trip li.past { opacity: 0.55; }
@@ -109,6 +109,7 @@
     ul.trip .t { font-variant-numeric: tabular-nums; }
     .note { padding: 0 24px 8px; color: var(--secondary-text-color, #727272); font-size: 12px; }
     footer { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 16px 16px; }
+    footer .back { margin-right: auto; }
     .btn {
       padding: 8px 12px; border: none; border-radius: 20px; background: none; cursor: pointer;
       color: var(--primary-color, #03a9f4); font: inherit; font-weight: 500; text-decoration: none;
@@ -375,6 +376,7 @@
       ${trip ? "" : status}
       ${body}
       <footer>
+        ${trip ? `<button class="btn back" data-action="back">← Departures</button>` : ""}
         ${entityId ? `<button class="btn" data-action="details">Entity details</button>` : ""}
         ${link}
       </footer>`;
@@ -386,7 +388,6 @@
     const dep = trip.dep;
     const head = `
       <div class="trip-head">
-        <button class="btn" data-action="back">← Departures</button>
         ${lineChip(dep.line)}<span class="dest">→ ${esc(dep.destination)}</span>
       </div>`;
     if (trip.error) return `${head}<div class="empty">Couldn't load this trip: ${esc(trip.error)}</div>`;
