@@ -18,6 +18,10 @@
   const MIN_QUERY = 2;
   const LOCATION_TIMEOUT_MS = 5000;
   const NEARBY_MAX_AGE_MS = 60000; // reuse the nearby list for a minute
+  // The results float over the dashboard in the browser's top layer, where no
+  // card or section can clip them. Without popover support they stay in the
+  // card and push the content below down.
+  const FLOATING = typeof HTMLElement.prototype.showPopover === "function";
 
   const FORM_LABELS = {
     placeholder: ["Placeholder", "Text in the empty search field. Default: Search stops"],
@@ -34,6 +38,14 @@
   const STYLE = `
     :host { display: block; }
     ha-card { overflow: hidden; }
+    ha-card.open { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+    .results[popover] {
+      position: fixed; inset: auto; margin: 0; padding: 0; border: none; overflow-y: auto;
+      box-sizing: border-box; color: var(--primary-text-color, #212121); font: inherit;
+      background: var(--ha-card-background, var(--card-background-color, #fff));
+      border-radius: 0 0 var(--ha-card-border-radius, 12px) var(--ha-card-border-radius, 12px);
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+    }
     .field {
       display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; height: 48px;
     }
@@ -90,6 +102,7 @@
       this._onOutside = (ev) => {
         if (!ev.composedPath().includes(this)) this._close();
       };
+      this._onMove = () => this._place();
     }
 
     setConfig(config) {
@@ -133,6 +146,7 @@
     disconnectedCallback() {
       document.removeEventListener("click", this._onOutside, true);
       clearTimeout(this._timer);
+      this._close();
     }
 
     _build() {
@@ -147,7 +161,7 @@
               role="combobox" aria-expanded="false" aria-controls="results">
             <button class="clear" hidden aria-label="Clear">×</button>
           </div>
-          <div class="results" id="results" hidden></div>
+          <div class="results" id="results" ${FLOATING ? 'popover="manual"' : "hidden"}></div>
         </ha-card>`;
       const input = this.shadowRoot.querySelector("input");
       input.addEventListener("focus", () => this._show());
@@ -284,6 +298,9 @@
     _pick(index) {
       const stop = this._stops[index];
       if (!stop) return;
+      // A floating list would cover the stop's dialog.
+      this._close();
+      this.shadowRoot.querySelector("input").blur();
       if (window.dbfCore) {
         window.dbfCore.showStop(stop);
       } else if (stop.url) {
@@ -295,8 +312,9 @@
       const results = this.shadowRoot?.querySelector(".results");
       if (!results) return;
       const input = this.shadowRoot.querySelector("input");
-      results.hidden = !this._open;
       input.setAttribute("aria-expanded", String(this._open));
+      if (FLOATING) this._float(results);
+      else results.hidden = !this._open;
       if (!this._open) return;
       const items = this._stops.map((stop, index) => {
         const distance = stop.distance_km != null ? `${stop.distance_km} km` : "";
@@ -313,6 +331,34 @@
         ${this._message ? `<div class="empty">${esc(this._message)}</div>` : ""}
         ${items.length ? `<ul role="listbox">${items.join("")}</ul>` : ""}`;
       results.querySelector("li.active")?.scrollIntoView({ block: "nearest" });
+    }
+
+    // Shows or hides the floating list, following the card while the page
+    // scrolls or resizes.
+    _float(results) {
+      const shown = results.matches(":popover-open");
+      this.shadowRoot.querySelector("ha-card").classList.toggle("open", this._open);
+      if (this._open && !shown) {
+        results.showPopover();
+        window.addEventListener("scroll", this._onMove, { capture: true, passive: true });
+        window.addEventListener("resize", this._onMove, { passive: true });
+      } else if (!this._open && shown) {
+        results.hidePopover();
+        window.removeEventListener("scroll", this._onMove, { capture: true });
+        window.removeEventListener("resize", this._onMove);
+      }
+      if (this._open) this._place();
+    }
+
+    _place() {
+      const results = this.shadowRoot?.querySelector(".results");
+      const card = this.shadowRoot?.querySelector("ha-card");
+      if (!results || !card || !results.matches(":popover-open")) return;
+      const rect = card.getBoundingClientRect();
+      results.style.left = `${rect.left}px`;
+      results.style.top = `${rect.bottom}px`;
+      results.style.width = `${rect.width}px`;
+      results.style.maxHeight = `${Math.max(120, window.innerHeight - rect.bottom - 8)}px`;
     }
   }
 
