@@ -102,7 +102,8 @@
       this._onOutside = (ev) => {
         if (!ev.composedPath().includes(this)) this._close();
       };
-      this._onMove = () => this._place();
+      this._frame = 0;
+      this._placed = "";
     }
 
     setConfig(config) {
@@ -151,6 +152,9 @@
 
     _build() {
       if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+      // A rebuild drops the open list, so start closed.
+      this._open = false;
+      this._stopFollowing();
       const placeholder = this._config.placeholder ?? "Search stops";
       this.shadowRoot.innerHTML = `<style>${STYLE}</style>
         <ha-card>
@@ -333,32 +337,49 @@
       results.querySelector("li.active")?.scrollIntoView({ block: "nearest" });
     }
 
-    // Shows or hides the floating list, following the card while the page
-    // scrolls or resizes.
+    // Shows or hides the floating list. While open it follows the card every
+    // frame: scrolling inside Home Assistant's shadow DOM, the sidebar and
+    // cards loading above move it without any event reaching the window.
     _float(results) {
       const shown = results.matches(":popover-open");
       this.shadowRoot.querySelector("ha-card").classList.toggle("open", this._open);
       if (this._open && !shown) {
         results.showPopover();
-        window.addEventListener("scroll", this._onMove, { capture: true, passive: true });
-        window.addEventListener("resize", this._onMove, { passive: true });
+        this._placed = "";
+        this._follow();
       } else if (!this._open && shown) {
         results.hidePopover();
-        window.removeEventListener("scroll", this._onMove, { capture: true });
-        window.removeEventListener("resize", this._onMove);
+        this._stopFollowing();
       }
-      if (this._open) this._place();
     }
 
-    _place() {
+    _follow() {
       const results = this.shadowRoot?.querySelector(".results");
       const card = this.shadowRoot?.querySelector("ha-card");
-      if (!results || !card || !results.matches(":popover-open")) return;
+      if (!this._open || !results?.matches(":popover-open") || !card) {
+        this._stopFollowing();
+        return;
+      }
       const rect = card.getBoundingClientRect();
-      results.style.left = `${rect.left}px`;
-      results.style.top = `${rect.bottom}px`;
-      results.style.width = `${rect.width}px`;
-      results.style.maxHeight = `${Math.max(120, window.innerHeight - rect.bottom - 8)}px`;
+      // The visual viewport shrinks for the on-screen keyboard; innerHeight
+      // doesn't on iOS.
+      const view = window.visualViewport;
+      const bottom = view ? view.offsetTop + view.height : window.innerHeight;
+      const height = Math.max(120, bottom - rect.bottom - 8);
+      const placed = `${rect.left},${rect.bottom},${rect.width},${height}`;
+      if (placed !== this._placed) {
+        this._placed = placed;
+        results.style.left = `${rect.left}px`;
+        results.style.top = `${rect.bottom}px`;
+        results.style.width = `${rect.width}px`;
+        results.style.maxHeight = `${height}px`;
+      }
+      this._frame = requestAnimationFrame(() => this._follow());
+    }
+
+    _stopFollowing() {
+      cancelAnimationFrame(this._frame);
+      this._frame = 0;
     }
   }
 
