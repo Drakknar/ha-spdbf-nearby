@@ -72,7 +72,7 @@ Status:
   - **Trip ids:** `tripId` in HAFAS departures comes from the patched build (`hafas-trip-id.pl`).
   - **Name search:** `q=` exists only in the owner's patched build (`station-name-search.pl`); upstream answers it with an error.
   - **Public fallback:** the optional fallback (`https://dbf.finalrewind.org`) runs upstream DBF, so upstream's response format matters there directly.
-  - For a DBF change, diff `lib/` between the two commits and check those requests and fields.
+  - For a new DBF version, diff `lib/` between the two versions and check those requests and fields.
   - You can run upstream DBF to check real responses: `docker run -d -p 8092:8092 -e 'DBFAKEDISPLAY_LISTEN=http://*:8092' derfnull/db-fakedisplay:latest`.
   - The owner's patched build is `ghcr.io/drakknar/db-fakedisplay:latest`; it adds `lat`/`lon` for HAFAS stops and the `q=` name search.
   - If upstream changed `/_geolocation`, say in the report that the patch in `Drakknar/db-fakedisplay-patched` may be affected too.
