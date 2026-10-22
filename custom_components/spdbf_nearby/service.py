@@ -15,7 +15,7 @@ It also runs DBF's status checks (status.py).
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 import json
 import logging
 from typing import Any
@@ -31,6 +31,7 @@ from .const import (
     DEFAULT_FALLBACK,
     DEFAULT_PROBLEM_AFTER,
     LAST_KNOWN_BOARD_REFRESH,
+    PAUSED_STOP_REFRESH,
     SEARCH_MAX_RESULTS,
     SOURCE_TRANSITOUS,
     TRANSITOUS_MAX_ROWS,
@@ -57,6 +58,8 @@ class TransportService:
         fallback = bool(config.get(CONF_FALLBACK, DEFAULT_FALLBACK))
         self.transitous = TransitousClient(hass) if fallback else None
         self.last_known = LastKnown(hass, entry_id)
+        # Board key -> when a paused map stop last asked Transitous.
+        self._paused_asked: dict[str, datetime] = {}
         self.status = DbfStatus(
             hass,
             entry_id,
@@ -169,11 +172,16 @@ class TransportService:
             if not (dbf_board.unreachable or dbf_board.failed):
                 self._keep_board(key, dbf_board)
                 return dbf_board
-        if live and self.transitous is not None:
+        # A paused map stop (live=False) shows its last known board while it
+        # has one; once that has run out, it asks Transitous now and then.
+        kept = None if live else self._kept_board(key, keep)
+        if kept:
+            return kept
+        if self.transitous is not None and (live or self._paused_refresh_due(key)):
             if board := await self._transitous_board(eva, source, name, pos, rows, keep):
                 self._keep_board(key, board)
                 return board
-        if kept := self._kept_board(key, keep):
+        if live and (kept := self._kept_board(key, keep)):
             return kept
         if dbf_board is not None:
             return dbf_board
@@ -204,6 +212,14 @@ class TransportService:
             _LOGGER.debug("Transitous board for %s %s failed: %s", source, eva, err)
             return None
         return Board(departures=departures[:keep], origin=ORIGIN_TRANSITOUS)
+
+    def _paused_refresh_due(self, key: str) -> bool:
+        """Return whether a paused stop may ask Transitous now (and note it)."""
+        now = dt_util.utcnow()
+        if (asked := self._paused_asked.get(key)) and now - asked < PAUSED_STOP_REFRESH:
+            return False
+        self._paused_asked[key] = now
+        return True
 
     def _keep_board(self, key: str, board: Board) -> None:
         """Remember a board with departures; a short one doesn't replace a
