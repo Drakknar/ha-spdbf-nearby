@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 import re
 from typing import Any
 
@@ -36,10 +37,20 @@ class Board:
     error: str | None = None
     # HAFAS service the departures came from, when it differs from the source.
     via: str | None = None
-    # The departures came from the public fallback instance.
-    fallback: bool = False
     # No server could be asked (the error says why).
     unreachable: bool = False
+    # The server answered with an error (a failing backend), not just "no
+    # departures right now".
+    failed: bool = False
+    # Where the departures come from: "dbf", "transitous" or "last_known".
+    origin: str = "dbf"
+    # When a last known board was fetched.
+    as_of: datetime | None = None
+
+    @property
+    def fallback(self) -> bool:
+        """Return whether the departures aren't live from DBF."""
+        return self.origin != "dbf"
 
 
 @dataclass
@@ -77,6 +88,31 @@ class Stop:
         if self.source == "BVG":
             return "bus"
         return "stop"
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the stop without its board, for storage."""
+        return {
+            "name": self.name,
+            "eva": self.eva,
+            "source": self.source,
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+            "merged": self.merged,
+            "linked": [stop.as_dict() for stop in self.linked],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Stop:
+        """Return a stop saved with as_dict."""
+        return cls(
+            name=data["name"],
+            eva=data["eva"],
+            source=data["source"],
+            latitude=data["latitude"],
+            longitude=data["longitude"],
+            merged=list(data.get("merged") or []),
+            linked=[cls.from_dict(item) for item in data.get("linked") or []],
+        )
 
 
 def tidy_line(train: Any, number: Any = None) -> str:
@@ -189,7 +225,11 @@ def combine_boards(own: Board, others: list[Board], keep: int) -> Board:
         departures=departures[:keep],
         error=None if departures else own.error,
         via=own.via,
-        fallback=own.fallback,
+        # The own board (BVG: U-Bahn, trams, buses) failing makes the whole
+        # board a failure, even with the linked DB lines, so it falls back.
+        failed=own.failed,
+        origin=own.origin,
+        as_of=own.as_of,
     )
 
 

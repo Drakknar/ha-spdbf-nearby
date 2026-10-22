@@ -262,7 +262,10 @@
         const result = await this._hass.callWS({ ...params, ...entry, ...(this._position ?? {}) });
         if (request !== this._request || !this._open) return null;
         this._stops = result.stops;
-        this._label = label;
+        // While DBF can't deliver, results come from Transitous or are the
+        // last known ones for this search.
+        const origin = window.dbfCore?.originNote(result);
+        this._label = origin ? `${label} · ${origin}` : label;
         this._message = result.stops.length ? "" : empty;
         this._active = -1;
         this._render();

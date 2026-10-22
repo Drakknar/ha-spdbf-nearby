@@ -22,7 +22,7 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.helpers.event import async_track_state_change_event
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 from homeassistant.util.location import distance as geo_distance
 
@@ -41,9 +41,11 @@ from .const import (
     MAX_GPS_ACCURACY_METERS,
     MERGE_CANDIDATE_FACTOR,
     MIN_MOVE_METERS,
+    STATUS_STATIONS,
     STOP_LOOKUP_MAX_AGE,
 )
-from .dbf import DbfClient, DbfError, distance_m
+from .dbf import DbfError, distance_m
+from .service import TransportService
 from .stations import (
     Board,
     Position,
@@ -75,7 +77,9 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
 
     config_entry: ConfigEntry
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, client: DbfClient) -> None:
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, client: TransportService
+    ) -> None:
         """Initialize the coordinator."""
         self.config = {**entry.data, **entry.options}
         self.map_stops = bool(self.config.get(CONF_MAP_STOPS, DEFAULT_MAP_STOPS))
@@ -106,6 +110,19 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
 
     async def _async_setup(self) -> None:
         await self.client.async_setup()
+
+    def check_stations(self) -> dict[str, str]:
+        """Return the station to check per network ({network: eva}).
+
+        Known busy stations where there are some (Berlin Hbf), so a check
+        doesn't depend on where you are; else the nearest map stop.
+        """
+        stations = {s: STATUS_STATIONS[s] for s in self.sources if s in STATUS_STATIONS}
+        nearest = sorted(self._stops.values(), key=lambda stop: self.distance_m(stop) or 0)
+        for stop in nearest:
+            for member in (stop, *stop.linked):
+                stations.setdefault(member.source, member.eva)
+        return stations
 
     @property
     def sources(self) -> list[str]:
@@ -165,47 +182,30 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
         fresh = False
         if self._needs_lookup():
             try:
-                # The fallback only looks stops up while the map has none: it
-                # has no coordinates for BVG stops, and requests are scarce.
-                candidates, via_fallback = await self._fetch_stops(
-                    self.position, allow_fallback=not self._stops
-                )
+                candidates = await self._fetch_stops(self.position)
             except DbfError as err:
-                if not self._stops:
-                    raise UpdateFailed(str(err)) from err
+                # Without stops yet (DBF down when Home Assistant starts) the
+                # entry still sets up: status checks, fallbacks and cards work
+                # without the map, and the lookup is retried every refresh.
                 _LOGGER.debug("Stop lookup failed, keeping previous stops: %s", err)
             else:
-                if via_fallback:
-                    # Not remembered as a lookup, so a full one follows as
-                    # soon as your server is back.
-                    self._stops = {s.key: s for s in candidates[: self._max_stops]}
-                else:
-                    self._stops, fresh = await self._pick_stops(candidates)
-                    self._lookup_pos = self.position
-                    self._lookup_time = dt_util.utcnow()
+                self._stops, fresh = await self._pick_stops(candidates)
+                self._lookup_pos = self.position
+                self._lookup_time = dt_util.utcnow()
 
         if self._departures and not fresh:
-            stops = list(self._stops.values())
-            if self.client.fallback_active:
-                stops.sort(key=lambda stop: self.distance_m(stop) or 0)
-                for stop in stops[FALLBACK_STOPS:]:
-                    stop.board = Board(
-                        error="Paused while your DBF server is unreachable"
-                        " (the public fallback only updates the nearest stops)",
-                        unreachable=True,
-                    )
-                stops = stops[:FALLBACK_STOPS]
-            await asyncio.gather(*(self._update_departures(stop) for stop in stops))
+            stops = sorted(self._stops.values(), key=lambda stop: self.distance_m(stop) or 0)
+            # While DBF struggles, only the nearest stops ask Transitous (a
+            # community service); the others show their last known boards.
+            live = FALLBACK_STOPS if self.client.degraded else len(stops)
+            await asyncio.gather(
+                *(self._update_departures(stop, live=i < live) for i, stop in enumerate(stops))
+            )
         return dict(self._stops)
 
-    async def _fetch_stops(
-        self, pos: Position, *, allow_fallback: bool = True
-    ) -> tuple[list[Stop], bool]:
-        """Return the stops within the radius, nearest first, and whether
-        they came from the fallback."""
-        stops, via_fallback = await self.client.fetch_candidates(
-            {"lat": str(pos[0]), "lon": str(pos[1])}, allow_fallback=allow_fallback
-        )
+    async def _fetch_stops(self, pos: Position) -> list[Stop]:
+        """Return the stops within the radius, nearest first."""
+        stops = await self.client.fetch_candidates({"lat": str(pos[0]), "lon": str(pos[1])})
         in_range = []
         for stop in stops:
             if previous := self._stops.get(stop.key):
@@ -214,7 +214,7 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
             if dist is not None and dist <= self._radius_m:
                 in_range.append((dist, stop))
         in_range.sort(key=lambda item: item[0])
-        return [stop for _, stop in in_range], via_fallback
+        return [stop for _, stop in in_range]
 
     async def _pick_stops(self, candidates: list[Stop]) -> tuple[dict[str, Stop], bool]:
         """Keep the nearest stops, merging stops that are one station.
@@ -223,7 +223,9 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
         Stops with the same board merge (stations.merge_same_board), and a
         DB station joins its BVG rail stop (stations.link_networks).
         """
-        merge_boards = self._merge and bool(self._departures)
+        # Boards from Transitous or last known data are no reliable guide to
+        # merging, and fetching every candidate would bypass FALLBACK_STOPS.
+        merge_boards = self._merge and bool(self._departures) and not self.client.degraded
         if not (merge_boards or self.client.merge_networks):
             return {stop.key: stop for stop in candidates[: self._max_stops]}, False
 
@@ -242,7 +244,7 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
                     )
         return {stop.key: stop for stop in picked}, merge_boards
 
-    async def _update_departures(self, stop: Stop) -> None:
+    async def _update_departures(self, stop: Stop, *, live: bool = True) -> None:
         # IRIS boards include arrival-only entries, so ask for extra rows.
         stop.board = await self.client.fetch_departures(
             stop.eva,
@@ -250,6 +252,9 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
             self._departures * 3,
             self._departures,
             [(s.eva, s.source) for s in stop.linked],
+            name=stop.name,
+            pos=(stop.latitude, stop.longitude),
+            live=live,
         )
 
     async def async_nearby(self, pos: Position | None) -> list[Stop]:
@@ -272,16 +277,26 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
         pos = pos or self.tracked_position()
         if pos is None:
             return []
-        stops, _ = await self._fetch_stops(pos)
+        stops = await self._fetch_stops(pos)
         if self.client.merge_networks:
             stops = link_networks(stops)
         return stops[: self._max_stops]
 
     async def async_board(
-        self, eva: str, source: str, linked: list[tuple[str, str]] | None = None
+        self,
+        eva: str,
+        source: str,
+        linked: list[tuple[str, str]] | None = None,
+        *,
+        name: str | None = None,
+        pos: Position | None = None,
     ) -> Board:
-        """Return a stop's full board; a map stop brings its linked stations."""
-        if linked is None:
-            stop = self._stops.get(f"{source}_{eva}")
-            linked = [(s.eva, s.source) for s in stop.linked] if stop else []
-        return await self.client.async_board(eva, source, linked)
+        """Return a stop's full board; a map stop brings its linked stations,
+        name and position (for finding it on Transitous)."""
+        if stop := self._stops.get(f"{source}_{eva}"):
+            if linked is None:
+                linked = [(s.eva, s.source) for s in stop.linked]
+            # A map stop's own name and position beat a card's title.
+            name = stop.name
+            pos = (stop.latitude, stop.longitude)
+        return await self.client.async_board(eva, source, linked or [], name=name, pos=pos)

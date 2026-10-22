@@ -9,11 +9,14 @@
 //   window.dbfCore.showTrip(stop, dep)      the dialog, opened on a departure's trip
 //   window.dbfCore.ride(from, to, lines?)   scheduled ride between two stations
 //                                           ({eva?, name?, network?}): {minutes, ...} or null
+//   window.dbfCore.status()                 {since} while DBF is down for real, else null
+//   window.dbfCore.originNote(answer)       "from Transitous ..." / "last known ..." or ""
 //
 // Opening a map stop (marker, entity search) shows the dialog instead of the
 // generic entity dialog; every other entity keeps Home Assistant's own. The
 // dialog loads the stop's full board (spdbf_nearby/board), and tapping a
-// departure shows its trip (spdbf_nearby/trip), from DBF only.
+// departure shows its trip (spdbf_nearby/trip). While DBF can't deliver, both
+// come from Transitous or are the last known ones, and say so.
 (() => {
   if (window.dbfCore) return;
 
@@ -79,6 +82,7 @@
       color: var(--text-primary-color, #fff);
     }
     .status { padding: 0 24px 8px; color: var(--secondary-text-color, #727272); font-size: 12px; }
+    .warn { color: var(--warning-color, #ffa600); font-weight: 500; }
     ul { list-style: none; margin: 0; padding: 0 8px; overflow-y: auto; }
     li {
       display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center;
@@ -122,6 +126,39 @@
     ));
   const homeAssistant = () => document.querySelector("home-assistant");
   const hass = () => homeAssistant()?.hass;
+
+  const clock = (iso) => {
+    const when = iso ? new Date(iso) : null;
+    return when && !Number.isNaN(when.getTime())
+      ? when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : "";
+  };
+
+  // The integration's DBF problem sensor (attribute spdbf_status), on while
+  // DBF has been down for real. Found once, then looked up by id.
+  let statusId = null;
+  let statusSearched = 0;
+  const STATUS_SEARCH_MS = 30000; // without the sensor, look again at most this often
+  function status() {
+    const states = hass()?.states;
+    if (!states) return null; // before Home Assistant is connected: not a search
+    if ((!statusId || !states[statusId]) && Date.now() - statusSearched > STATUS_SEARCH_MS) {
+      statusSearched = Date.now();
+      statusId = Object.keys(states).find((id) => states[id].attributes?.spdbf_status === true) ?? null;
+    }
+    const sensor = statusId ? states[statusId] : null;
+    return sensor?.state === "on" ? { since: sensor.attributes.failing_since } : null;
+  }
+
+  // Where a board, trip or search answer came from, if not live from DBF.
+  function originNote(answer) {
+    if (answer?.origin === "transitous") return "from Transitous (DBF can't deliver)";
+    if (answer?.origin === "last_known") {
+      const at = clock(answer.as_of);
+      return at ? `last known, as of ${at}` : "last known";
+    }
+    return "";
+  }
 
   const readView = () => {
     try { return localStorage.getItem(VIEW_KEY) === "time" ? "time" : "line"; } catch (e) { return "line"; }
@@ -173,6 +210,12 @@
       // A searched DB + BVG station names its other network; a map stop
       // doesn't need to, the integration knows it.
       if (!entityId && stop.linked?.length) request.linked = stop.linked;
+      // To find the stop on Transitous while DBF can't deliver.
+      if (stop.name) request.name = stop.name;
+      if (stop.latitude != null && stop.longitude != null) {
+        request.latitude = stop.latitude;
+        request.longitude = stop.longitude;
+      }
       const result = await ha.callWS(request);
       if (mine !== session) return;
       board = result;
@@ -342,9 +385,9 @@
 
     const distance = info.distance_km != null ? ` · ${esc(info.distance_km)} km` : "";
     const viaName = board?.departures_via ?? state?.attributes.departures_via;
-    const fallback = board ? board.fallback : state?.attributes.fallback;
+    const origin = originNote(board ?? state?.attributes);
     const via = (viaName ? ` · departures via ${esc(viaName)}` : "")
-      + (fallback ? " · from the public DBF (yours is unreachable)" : "");
+      + (origin ? ` · ${esc(origin)}` : "");
     const merged = info.merged_stops?.length
       ? `<div class="sub">Includes ${info.merged_stops.map(esc).join(", ")}</div>`
       : "";
@@ -352,7 +395,11 @@
     const link = url
       ? `<a class="btn" href="${esc(url)}" target="_blank" rel="noopener">Open in spdbf</a>`
       : "";
-    const status = board && boardError
+    const down = status();
+    const warning = down
+      ? `<div class="status warn">Live data from DBF unavailable${down.since ? ` since ${esc(clock(down.since))}` : ""}</div>`
+      : "";
+    const progress = board && boardError
       ? `<div class="status">Update failed: ${esc(boardError)}</div>`
       : !board && deps
         ? `<div class="status">Loading all departures…</div>`
@@ -373,7 +420,8 @@
         <button data-view="line" ${pressed("line")}>By line</button>
         <button data-view="time" ${pressed("time")}>By time</button>
       </div>`}
-      ${trip ? "" : status}
+      ${warning}
+      ${trip ? "" : progress}
       ${body}
       <footer>
         ${trip ? `<button class="btn back" data-action="back">← Departures</button>` : ""}
@@ -411,7 +459,9 @@
           <div class="when">${platform}</div>
         </li>`;
     });
-    const note = data.times ? "" : `<div class="note">DBF has no times for this train, only its stops.</div>`;
+    const origin = originNote(data);
+    const note = (origin ? `<div class="note">Trip ${esc(origin)}</div>` : "")
+      + (data.times ? "" : `<div class="note">DBF has no times for this train, only its stops.</div>`);
     const messages = (data.messages ?? []).map((m) => `<div class="note">${esc(m)}</div>`).join("");
     return `${head}${note}${messages}<ul class="trip">${rows.join("")}</ul>`;
   }
@@ -487,6 +537,8 @@
       url: attrs.url,
       merged_stops: attrs.merged_stops ?? [],
       networks: attrs.networks,
+      latitude: attrs.latitude,
+      longitude: attrs.longitude,
     };
   }
 
@@ -512,6 +564,8 @@
     lineKey,
     lineStyle,
     showStop,
+    status,
+    originNote,
     showTrip(info, dep) {
       showStop(info);
       openTrip(dep);

@@ -4,7 +4,7 @@ Context for picking this project up later. The user-facing docs are in README.md
 
 ## What this is
 
-`spdbf_nearby` is a Home Assistant custom integration, distributed through HACS as `Drakknar/ha-spdbf-nearby`. It shows public transport stops near a tracked person on the Home Assistant map, with live departures, using the author's own [DBF](https://github.com/derf/db-fakedisplay) (db-fakedisplay) server. Home Assistant only talks to that DBF server.
+`spdbf_nearby` is a Home Assistant custom integration, distributed through HACS as `Drakknar/ha-spdbf-nearby`. It shows public transport stops near a tracked person on the Home Assistant map, with live departures, using the author's own [DBF](https://github.com/derf/db-fakedisplay) (db-fakedisplay) server. Home Assistant talks to that DBF server, and only while DBF can't deliver, to Transitous (since 0.9.0).
 
 It belongs with two sibling projects:
 
@@ -21,9 +21,21 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
   custom_components/spdbf_nearby/   <- this folder
     __init__.py         Serves www/ as static files, injects spdbf-loader.js on every page
                         (add_extra_js_url), registers the WebSocket commands, creates the
-                        DbfClient and the coordinator, and the geo_location platform if map stops are on
-    dbf.py              Core: DbfClient talks to DBF (fast fail, public fallback, Repairs), reads
-                        boards, searches, caches full boards, fetches trips
+                        TransportService and the coordinator, runs the status checks every minute,
+                        sets up binary_sensor (always) and geo_location (if map stops are on),
+                        adds the dashboard resource, migrates 0.8 entries (minor version 2)
+    service.py          TransportService: what every feature asks. DBF, else Transitous, else
+                        the last known answer, for boards, trips, search and rides; runs checks
+    dbf.py              Core: DbfClient talks to DBF only (fast fail), reads boards, searches,
+                        caches full boards, fetches trips, async_check (one live board, past caches)
+    transitous.py       TransitousClient: boards (v6/stoptimes), trips (v6/trip), stop search and
+                        DBF-stop matching (v1/geocode), in the integration's own shapes
+    last_known.py       LastKnown: last good boards/trips/searches/rides in HA storage
+                        (spdbf_nearby.last_known.<entry_id>), 24 h, capped per kind
+    status.py           DbfStatus: per-network check results, "down for real" after problem_after,
+                        the Repairs notice
+    binary_sensor.py    "spdbf DBF problem" (device class problem), attribute spdbf_status: true
+    frontend.py         Adds/updates/removes the loader as a Lovelace resource (storage mode)
     stations.py         Core, no network: Stop/Board, tidy_line, DB + BVG linking, same-board
                         merging, board combining, search ranking
     coordinator.py      The map feature: follows the tracked entity, keeps nearby stops and their
@@ -80,24 +92,26 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
   - **Search ranking (since 0.4.1):** DB's station list matches loosely, and DBF lists DB before BVG. Live on 2026-10-14, "Alexanderplatz" started with "Neanderthal" and "Hauptbahnhof" with Düsseldorf.
     - **Order:** first the station itself (its normalised name equals the query, "Hbf" = "Hauptbahnhof"), then other names containing the query (e.g. its exits), then the rest; nearest first within each group. Distance is measured from the card's position, else the tracked person.
 - **Stop search (since 0.3.0):** `POST <server>/_geolocation` with `q=<name>` and `hafas=<service>`, once per HAFAS source like the coordinate lookup. This needs the `station-name-search.pl` patch of `Drakknar/db-fakedisplay-patched`. Upstream answers `{"error": "Invalid lon/lat received"}`, which the coordinator turns into a "use the patched image" message. Upstream's own name search only renders HTML, and its JSON mode returns just an error for ambiguous names.
-- **Your server down (since 0.3.0):** all requests go through `_request_json`.
-  - **Fast fail:** a connection error, a timeout (5 s to connect, 20 s in total) or a gateway status (502/503/504) marks the server down. Any other HTTP error comes from DBF itself and doesn't count.
-  - **Retry:** while down, the server is skipped for `PRIMARY_RETRY_AFTER` (60 s), then the next request probes it. An outage therefore costs one round of at most 4 timeouts, not one per stop.
-  - **Logging:** one warning when the server goes down, one info line when it's back. On recovery the board cache is cleared.
-  - **What you see:** stops stay on the map, with `departures_error` set. A Repairs issue `server_unreachable_<entry_id>` appears after 5 minutes and is deleted on recovery.
-  - **At startup:** if there is no stop yet, `UpdateFailed` makes Home Assistant retry setup. WebSocket commands then answer `not_ready` with the entry's reason.
-  - **Options while down:** they can be saved if the server URL is unchanged, so you can turn the fallback on during an outage.
-- **Public fallback (option `fallback`, default off; `fallback_url`, default `https://dbf.finalrewind.org`):** only used while your server is marked down.
-  - **What the public instance is:** stock DBF, so HAFAS stops come without coordinates and there's no name search. It also asks for at most 10 requests per minute; checked 2026-10-14, its board JSON matches.
-  - **Budget:** `_take_fallback_slot` caps requests at 10 per rolling minute. Past that, `ServerUnreachable` is raised with a "try again shortly" message.
-  - **Coordinator updates:** only the `FALLBACK_STOPS` (3) nearest stops update. The others get an "unreachable" board saying they are paused.
-  - **Stop lookups:** they use the fallback only when the map has no stops. Such a lookup isn't remembered as one, so a full lookup follows once your server is back. No merging, and no `missing_coordinates` issue for the public instance.
-  - **Search:** never uses the fallback.
-  - **Marking:** boards from the fallback carry `fallback: true`, which becomes an entity attribute and is part of the WebSocket answer. Their links point to the fallback.
+- **Your server down (since 0.3.0):** all DBF requests go through `DbfClient.request_json`.
+  - **Fast fail:** a connection error, a timeout (5 s to connect, 20 s in total) or a gateway status (502/503/504) marks the server down (`ServerUnreachable`). Any other HTTP error comes from DBF itself (a failing backend: `DbfError`, board `failed=True`).
+  - **Retry:** while down, the server is skipped for `PRIMARY_RETRY_AFTER` (60 s), then the next request probes it. An outage therefore costs one round of at most 4 timeouts, not one per stop. Status checks always reach the server and end the window on success.
+  - **At startup (since 0.9.0):** a failed stop lookup no longer fails setup (before, `UpdateFailed` kept the entry in setup retry, so no status checks, fallbacks or card boards). The map starts empty and the lookup is retried every refresh. `not_ready` remains for entries in setup retry for other reasons.
+  - **Options while down:** they can be saved if the server URL is unchanged.
+- **Fallbacks (since 0.9.0, `service.py`; owner's order, 2026-10-22: DBF → Transitous → last known):**
+  - **When:** a board falls back when DBF is unreachable or `failed` (answered with an error). An empty board (no service right now, DBF's HTTP 300 "no data") is an answer. Search falls back on `ServerUnreachable`, or on a `DbfError` while a status check fails (an unpatched server's refusal is no outage). Trips: Transitous refs (`{transitous: id}`) go to Transitous; DBF trips fall back to last known only (a DB/BVG trip can't be looked up on Transitous). Rides: last known while degraded.
+  - **Transitous (option `fallback`, default on):** `api.transitous.org`, User-Agent `spdbf-nearby-home-assistant/<version>`. A DBF stop is matched by `v1/geocode` (name + position bias): BVG/VBB numbers are part of VBB stop ids (`de-VBB_de:11000:900110001`), so they match exactly; others by `station_names` and ≤500 m when the position is known. Never "first result": geocoding is Europe-wide. Matches are cached per process. Boards: `v6/stoptimes?stopId&n&radius=50` (the station's platforms, not nearby bus stops), 60 s cache. Search results are stops with network `Transitous` (accepted by `board`; no DBF link).
+  - **Map politeness:** while `degraded` (fast-fail window or a failing check), only the `FALLBACK_STOPS` (3) nearest map stops are fetched live (DBF → Transitous); the others get their last known board (`live=False`).
+  - **Last known (`last_known.py`):** good answers per key (board: `source_eva` plus linked; trip: the ref as JSON; search: `search_text(query)`; ride: start/end/lines), 24 h, at most 200/100/50/50, saved 60 s after a change, deleted with the entry. Departures carry `expected` (ISO), so a kept board is shown with minutes from now and departed rows dropped. A map stop's few rows don't replace a dialog's longer board younger than 5 min.
+  - **Marking:** boards have `origin` (`dbf`, `transitous`, `last_known`) and `as_of`; `fallback` stays as `origin != "dbf"`. Entities show `fallback`, `origin`, `as_of` (unrecorded). The dialog, search card and connection card show "from Transitous (DBF can't deliver)" / "last known, as of HH:MM" (`dbfCore.originNote`).
+  - **Why not dbf.finalrewind.org any more (owner, 2026-10-22):** same upstreams as yours (it fails together with them, which is the outage actually seen), no name search, no BVG trip ids, 10 requests/min. Entries from 0.8 are migrated: `fallback_url` dropped, `fallback` set on (the old on/off meant something else).
+- **Status checks (since 0.9.0, `status.py`):** every `STATUS_INTERVAL` (60 s) `async_check` fetches one live board per network: `STATUS_STATIONS` (Berlin Hbf: DB 8011160, BVG 900003201) else the nearest map stop of that network. The URL carries `spdbf_check=<epoch>`, so a cache in front of DBF (the owner's SWAG `spdbf` site serves stale boards up to 15 min) can't answer. 5xx, timeouts and gateway errors fail; HTTP 300 counts as working.
+  - **Per network:** a network failing for `problem_after` (option, default 10 min) makes DBF "down for real", even if the other works. One working check of that network ends it.
+  - **Shown as:** `binary_sensor.spdbf_dbf_problem` (unique id `<entry>_dbf_problem`; attributes `failing_since`, `failing` {network: since, reason}, `last_check`, `fallback`, `spdbf_status: true` for the frontend to find it), the Repairs issue `server_unreachable_<entry_id>` (now "DBF isn't delivering departures"), and the cards' and dialog's warning line. All clear on recovery; the issue is also removed on unload.
 - **WebSocket commands (`websocket_api.py`):**
   - **`search`** `{query}` and **`nearby`** `{latitude?, longitude?}` return `stops` with name, eva, network, coordinates, `distance_km`, `entity_picture`, `url`, `merged_stops` and `networks`.
   - **`nearby` without a position,** or within 100 m of the tracked entity, returns the coordinator's current (merged) stops. Elsewhere it does a fresh, unmerged lookup.
-  - **`board`** `{eva, network, linked?}` returns up to 80 departures (150 rows asked from DBF), cached for 20 s per stop (not while unreachable). It also returns `fallback` and `server_unreachable`. `network` must be a configured source.
+  - **`board`** `{eva, network, linked?, name?, latitude?, longitude?}` returns up to 80 departures (150 rows asked from DBF), cached for 20 s per stop (not while unreachable). It also returns `fallback`, `origin`, `as_of` and `server_unreachable`. `network` must be a configured source or `Transitous`; name and position help find the stop on Transitous.
+  - **`search`** also returns `origin` and `as_of`; **`trip`** accepts `{transitous: id}` and returns `origin` (and `as_of` when last known).
   - **Errors:** `server_unreachable`, `dbf_error`, `not_ready`, `not_found`, `invalid_network`.
   - **Which entry:** each command takes an optional `entry_id`. By default it uses the entry whose tracked person belongs to the logged-in user, else the first loaded entry.
 - **Entities:** `geo_location` entities, state = distance in km.
@@ -135,6 +149,7 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
     - **Shown:** the trip's stops with times and delays, and platforms. Stops before the station are dimmed; the station itself is bold, matched by eva, the `current` flag or name.
     - **Also:** HIM messages (e.g. lifts out of order), and a note when DBF has only stop names.
     - **Back:** "← Departures" returns to the board.
+- **Connection card fallback (since 0.9.0):** while its sensor is unavailable (state `unavailable`/`unknown` or no `next_departures`: DBF down longer than the SWAG cache covers), the card calls `board` for the remembered station every 60 s and shows those rows (DBF → Transitous → last known) with a warning line. While live it keeps `{eva, network, name, dests}` in `localStorage` (`spdbf-connection-station:<entity>`): `dests` are the `normStation`-normalised destinations of rows on the chosen platforms. Rows without a platform (Transitous rarely has S-Bahn tracks) pass the platform filter when their destination is one of those, so the direction holds. Checked 2026-10-22 in a Node fake-DOM test (Savignyplatz platform 4: Ahrensfelde shown, Potsdam hidden, line filter kept, warning, tappable Transitous trip, no re-request within a minute, recovery).
 - **Connection card (`www/spdbf-connection-card.js`, since 0.6.0):** `custom:spdbf-connection-card` shows one stop's departures from a db_infoscreen sensor. It replaces the owner's fork `Drakknar/ha-dbf-departures-card` on the Public transport dashboard. db_infoscreen stays, by the owner's choice.
   - **Options:** `entity`, `title`, `icon`, `departures`, `platforms` (exact, or the start before a space: "2" matches BVG's "2 (U2)"), `lines`, `destinations` (case-insensitive part of the name), `hide_destinations` (since 0.7.2: the reverse, for stops without platforms such as BVG bus stops, so a bus ending early in your direction still shows; a hidden value counts as "seen" when hiding it removes a departure). `departureFilter(config)` is shared by the card and its editor, `walk_minutes`.
   - **Link row (since 0.8.0 under the card, owner's choice: on mobile the duration belongs to the leg it times):** "↓ 15 min ride · 4 min walk"; `show_ride` and `show_walk` turn each part off. It replaces the dashboard's hand-written "↓ N Mins" markdown. Padding is 8px above and below, so on mobile it doesn't touch the next card.
@@ -165,6 +180,7 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
   - **Location:** the browser's location (needs HTTPS and permission, 5 s timeout), else the tracked entity.
   - **Options:** `placeholder`, `use_device_location`, `entry_id`.
   - **Cache busting:** `FRONTEND_VERSION` (the `?v=` query string) is read from `manifest.json`, so every release makes browsers and the companion app fetch the new files. Until 0.7.3 it was a hand-bumped constant and stayed at 0.6.1 through 0.7.0–0.7.2, so the app could keep running the 0.6.1 cards.
+- **Dashboard resource (since 0.9.0, `frontend.py`):** the loader is also a Lovelace resource, `/spdbf_nearby/spdbf-loader.js?v=<version>&via=resource` (its own URL: a browser may remember the extra module URL's failed import). HA imports resources whenever a dashboard loads, so a failed page-open import no longer leaves the cards broken until a reload. Storage mode only; updated on version change, duplicates removed, deleted with the last entry (`async_remove_entry`). The owner saw "Configuration error" in Firefox (Mac, 2026-10-22); confirming the cause still needs the console (lines with `spdbf`).
 - **Loader (`www/spdbf-loader.js`, since 0.7.3):** the only `add_extra_js_url` module. It imports `dbf-core.js` and both cards in parallel and retries each failed import after 2, 5, 15, 30, then every 60 s, and right away on `online` or when the page becomes visible. A retry adds `&retry=N`, since a browser may keep a failed module import for the page's lifetime; the files' own guards (`window.dbfCore`, `customElements.get`) make loading twice harmless.
   - **Why (owner, 2026-10-16):** in the companion app, the connection and search cards often stayed "Configuration error" ("Custom element doesn't exist" in edit mode) until the app reloaded, while headings were fine. Home Assistant imports extra modules once when the page opens, with no retry; if that fetch fails (app opening before network/VPN is up), the elements are never defined. Lovelace resources don't have this, as they load after the connection. HA's `_customCreate` (frontend `create-element-base.ts`) shows the error after 2 s and rebuilds the card on `customElements.whenDefined`, so a late successful load fixes the cards without a reload.
   - **Checked 2026-10-16** in a Node fake-DOM test: failed imports retried on timer, `online` and `visibilitychange`; all three loaded; a second run does nothing; no listeners left.
@@ -180,7 +196,7 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
 
 ## Testing
 
-There are **no automated tests** yet. What has been done for changes so far:
+There are **no automated tests in the repository**. What has been done for changes so far:
 
 1. `python -m py_compile custom_components/spdbf_nearby/*.py`
 2. Check the DBF server directly:
@@ -206,6 +222,10 @@ There are **no automated tests** yet. What has been done for changes so far:
   - **`pip install home-assistant-frontend==<pinned>`**, because the `frontend` dependency needs it.
   - **Teardown errors:** the hass fixture's teardown raises `WinError 10022` in tests that use the HTTP/WebSocket client. That's an environment issue; the tests themselves pass.
 
+**0.9.0 review (2026-10-22):** an independent review agent found 10 issues, all confirmed and fixed: setup failing while DBF is down (now loads), a failing BVG backend hidden by the merged DB lines (`failed` now follows the own board), Transitous matches cached when unsure or missing (only sure matches are kept; titles retried without "(...)" / "→ ..."; map stops use their own name and position), stop lookups bypassing the 3-stop limit while degraded (no merging lookups then), an empty IRIS board with a failing ÖBB retry counted as failure (now only "no backend answered"), the last known store not flushed on unload, the card hiding the board's error, `status()` rescanning all states on every update (at most every 30 s, and never before `hass` exists: the first version of that fix hid the warning for 30 s after page load, caught by the card test), a late check after unload recreating the Repairs notice, and concurrent resource registration (lock in `hass.data`).
+
+**0.9.0 scratch pytest (2026-10-22, `pytest-homeassistant-custom-component` 0.13.373 = HA 2026.10.2, frontend 20260930.4, Python 3.14 on the Windows PC):** 18 tests (13 + 5 for the review fixes), all passed (same Windows workarounds as below, plus `pytest.ini` with `asyncio_mode = auto`): live setup (no Transitous call while DBF works), the 0.8 → 0.9 migration, a 500 board → Transitous (matched by BVG number), an empty board is an answer, last known board with minutes from now, map stops beyond the nearest 3 on last known, the problem sensor and Repairs notice after 10 minutes and their recovery, one failing network (BVG) is enough, search → Transitous and those stops' boards, search → last known, Transitous trips and last known DBF trips, fallback off, and the dashboard resource (updated from 0.8.3, removed with the entry). Interval jobs run as background tasks: use `async_block_till_done(wait_background_tasks=True)` after `async_fire_time_changed`.
+
 **0.3.0 frontend checks (2026-10-14):** both scripts were run under Node (VS Code's `Code.exe` with `ELECTRON_RUN_AS_NODE=1`) against a hand-made fake DOM and `hass`.
 - **Dialog:**
   - **By line:** order S7, U2 Pankow, U2 Ruhleben, M4; 3 times per line; U2 colour; cancelled times struck through.
@@ -215,6 +235,8 @@ There are **no automated tests** yet. What has been done for changes so far:
   - **Stale answers:** a search still on its way is dropped when the field is cleared and the cached nearby list shows. That bug was found and fixed this way.
 
 ## Open items
+
+- **0.9.0 (2026-10-22), not yet live:** after the HACS update and restart, check the problem sensor, the dashboard resource, and a simulated outage (owner's SWAG `spdbf.conf` hop pointed at a closed port): cache stale → sensor/Repairs after 10 min → map, search and dialog on Transitous → cards on their fallback once the sensors go unavailable → recovery.
 
 - **0.3.0 (2026-10-14), installed but not yet tested in Home Assistant:** stop search card, full-board dialog, duplicate merging, outage handling and the public fallback. The DBF image with `station-name-search.pl` is deployed, and its name search answered on the author's server.
   - **Check:** the card's nearby list and search, the dialog's grouping at Alexanderplatz, and merged markers on the map.

@@ -64,6 +64,8 @@ class SpdbfStop(CoordinatorEntity[SpdbfCoordinator], GeolocationEvent):
             "url",
             "merged_stops",
             "fallback",
+            "origin",
+            "as_of",
             "networks",
         }
     )
@@ -105,9 +107,7 @@ class SpdbfStop(CoordinatorEntity[SpdbfCoordinator], GeolocationEvent):
             "network": stop.source,
             "eva": stop.eva,
             "distance_km": self.distance,
-            "url": self.coordinator.client.board_url(
-                stop.eva, stop.source, board.via, board.fallback
-            ),
+            "url": self.coordinator.client.board_url(stop.eva, stop.source, board.via),
             "departures": board.departures,
         }
         if stop.merged:
@@ -117,7 +117,11 @@ class SpdbfStop(CoordinatorEntity[SpdbfCoordinator], GeolocationEvent):
         if board.via:
             attrs["departures_via"] = board.via
         if board.fallback:
+            # Transitous or last known departures (as_of: when they were fetched).
             attrs["fallback"] = True
+            attrs["origin"] = board.origin
+            if board.as_of:
+                attrs["as_of"] = board.as_of.isoformat()
         if board.error:
             attrs["departures_error"] = board.error
         if board.departures:

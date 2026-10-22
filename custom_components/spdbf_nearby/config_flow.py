@@ -33,11 +33,11 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_DEPARTURES,
     CONF_FALLBACK,
-    CONF_FALLBACK_URL,
     CONF_MAP_STOPS,
     CONF_MAX_STOPS,
     CONF_MERGE_DUPLICATES,
     CONF_MERGE_NETWORKS,
+    CONF_PROBLEM_AFTER,
     CONF_PUBLIC_URL,
     CONF_RADIUS,
     CONF_SCAN_INTERVAL,
@@ -46,11 +46,11 @@ from .const import (
     CONF_TRACKED_ENTITY,
     DEFAULT_DEPARTURES,
     DEFAULT_FALLBACK,
-    DEFAULT_FALLBACK_URL,
     DEFAULT_MAP_STOPS,
     DEFAULT_MAX_STOPS,
     DEFAULT_MERGE_DUPLICATES,
     DEFAULT_MERGE_NETWORKS,
+    DEFAULT_PROBLEM_AFTER,
     DEFAULT_RADIUS,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SOURCES,
@@ -131,9 +131,14 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
                 CONF_FALLBACK, default=values.get(CONF_FALLBACK, DEFAULT_FALLBACK)
             ): BooleanSelector(),
             vol.Required(
-                CONF_FALLBACK_URL,
-                default=values.get(CONF_FALLBACK_URL) or DEFAULT_FALLBACK_URL,
-            ): url,
+                CONF_PROBLEM_AFTER,
+                default=values.get(CONF_PROBLEM_AFTER, DEFAULT_PROBLEM_AFTER),
+            ): NumberSelector(
+                NumberSelectorConfig(
+                    min=1, max=120, step=1, unit_of_measurement="min",
+                    mode=NumberSelectorMode.BOX,
+                )
+            ),
             vol.Required(
                 CONF_SCAN_INTERVAL,
                 default=values.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
@@ -170,6 +175,8 @@ class SpdbfConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for spdbf Public Transport."""
 
     VERSION = 1
+    # 2: Transitous replaced the public DBF fallback (fallback_url is gone).
+    MINOR_VERSION = 2
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -214,7 +221,7 @@ class SpdbfOptionsFlow(OptionsFlow):
                 CONF_SERVER_URL
             )
             # Your server may be down right now, which is when you'd want to
-            # turn on the fallback. Only a new server URL must answer.
+            # change the fallback. Only a new server URL must answer.
             if (
                 errors == {CONF_SERVER_URL: "cannot_connect"}
                 and user_input[CONF_SERVER_URL] == current_server
