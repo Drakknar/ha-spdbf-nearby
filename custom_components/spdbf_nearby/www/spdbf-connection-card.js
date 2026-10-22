@@ -28,10 +28,20 @@
 // Before 0.8.0 the row sat above the second card (ride_from: the previous
 // card's sensor); a card with ride_from and neither ride_to option still
 // shows it that way.
+//
+// While the sensor is unavailable (DBF down longer than any cache in front of
+// it covers), the card asks the integration for the station's board instead:
+// DBF, else Transitous, else the last known departures, and says which. It
+// remembers the station, and the destinations seen on its platforms, while the
+// sensor works; Transitous often has no platforms, so those destinations stand
+// for the direction then. A warning line shows while DBF is down for real.
 (() => {
   if (customElements.get("spdbf-connection-card")) return;
 
   const TICK_MS = 30000; // keeps "in N min" current between sensor updates
+  const FALLBACK_REFRESH_MS = 60000; // the station's board while the sensor is unavailable
+  const STATION_KEY = "spdbf-connection-station:"; // + entity id, in localStorage
+  const MAX_KNOWN_DESTINATIONS = 40;
   const RIDE_REFRESH_MS = 10 * 60000; // scheduled ride times hardly change
   const RIDE_TYPING_MS = 1000; // in the editor, look up once typing pauses
   const DEFAULT_DEPARTURES = 6;
@@ -75,6 +85,7 @@
     .late, li.cancelled .min { color: var(--error-color, #db4437); }
     li.cancelled .dest div { text-decoration: line-through; opacity: 0.7; }
     .empty { padding: 8px 16px 16px; color: var(--secondary-text-color, #727272); font-size: 14px; }
+    .warn { padding: 0 16px 4px; color: var(--warning-color, #ffa600); font-size: 12px; font-weight: 500; }
   `;
 
   const FORM_LABELS = {
@@ -127,9 +138,37 @@
     return text.length >= 16 ? text.slice(11, 16) : text.slice(0, 5);
   };
 
+  // Station names without mode, town and brackets: "S Westkreuz (Berlin)",
+  // "Berlin Westkreuz" and "Westkreuz" all become "westkreuz".
+  const normStation = (name) => String(name ?? "").toLowerCase()
+    .replace(/\[[^\]]*\]|\([^)]*\)/g, " ")
+    .replace(/^\s*(s\+u|s|u)\s+/, "")
+    .replace(/\b(bhf|bahnhof)\b/g, " ")
+    .replace(/^berlin[\s-]+/, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
+  // The station of a card's sensor, remembered for when the sensor is
+  // unavailable (it then has no attributes): {eva, network, name, dests}.
+  const readStation = (entity) => {
+    try { return JSON.parse(localStorage.getItem(STATION_KEY + entity) ?? "null"); } catch (e) { return null; }
+  };
+  const saveStation = (entity, station) => {
+    try { localStorage.setItem(STATION_KEY + entity, JSON.stringify(station)); } catch (e) { /* private mode */ }
+  };
+
+  const clockOf = (iso) => {
+    const when = iso ? new Date(iso) : null;
+    return when && !Number.isNaN(when.getTime())
+      ? when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : "";
+  };
+
   // The card's filters, shared by the card and its editor. A platform "2"
   // also matches BVG's "2 (U2)"; a destination matches part of the name.
-  const departureFilter = (config) => {
+  // knownDests (normStation names) stand for the chosen platforms on rows
+  // without a platform, as Transitous's often are.
+  const departureFilter = (config, knownDests = null) => {
     const platforms = asList(config.platforms).map((p) => p.toLowerCase());
     const lines = asList(config.lines).map((line) => tidy(line).toUpperCase());
     const destinations = asList(config.destinations).map((d) => d.toLowerCase());
@@ -137,7 +176,10 @@
     return ({ dep, line }) => {
       const platform = String(dep.platform ?? "").trim().toLowerCase();
       const destination = String(dep.destination ?? "").toLowerCase();
-      return (!platforms.length || platforms.some((p) => platform === p || platform.startsWith(`${p} `)))
+      const onPlatform = !platforms.length
+        || platforms.some((p) => platform === p || platform.startsWith(`${p} `))
+        || (!platform && knownDests !== null && knownDests.has(normStation(dep.destination)));
+      return onPlatform
         && (!lines.length || lines.includes(line.toUpperCase()))
         && (!destinations.length || destinations.some((d) => destination.includes(d)))
         && !hidden.some((d) => destination.includes(d));
@@ -147,6 +189,20 @@
   const sensorRows = (state) => (Array.isArray(state?.attributes?.next_departures)
     ? state.attributes.next_departures : [])
     .map((dep) => ({ dep, line: tidy(dep.train, dep.trainNumber) }));
+
+  // A departure of spdbf_nearby/board in the sensor's row shape.
+  const boardRow = (dep) => ({
+    dep: {
+      destination: dep.destination,
+      platform: dep.platform,
+      delay: dep.delay,
+      scheduledDeparture: dep.scheduled,
+      departure_timestamp: dep.expected ? Date.parse(dep.expected) / 1000 : null,
+      isCancelled: dep.cancelled,
+      spdbfTrip: dep.trip,
+    },
+    line: dep.line,
+  });
 
   const platformOf = ({ dep }) => String(dep.platform ?? "").trim();
   const destinationOf = ({ dep }) => String(dep.destination ?? "").trim();
@@ -327,6 +383,9 @@
       this._timer = null;
       this._rows = [];
       this._ride = null; // { key, time, result }
+      this._fallback = null; // { time, result, error } while the sensor is unavailable
+      this._fallbackLoading = false;
+      this._downKey = "";
     }
 
     setConfig(config) {
@@ -351,8 +410,56 @@
       const changed = state !== this._state;
       this._hass = hass;
       this._state = state;
-      if (changed) {
-        this._updateRide();
+      const down = core()?.status();
+      const downKey = down ? `on ${down.since}` : "off";
+      if (changed) this._updateRide();
+      if (changed || downKey !== this._downKey) {
+        this._downKey = downKey;
+        this._render();
+      }
+    }
+
+    // The sensor delivers (also "no departures right now").
+    _live() {
+      const state = this._state;
+      return Boolean(state) && state.state !== "unavailable" && state.state !== "unknown"
+        && Array.isArray(state.attributes?.next_departures);
+    }
+
+    // Remembers the station and the destinations on the chosen platforms.
+    _remember() {
+      const stop = this._stop();
+      if (!stop.eva) return;
+      const entity = this._config.entity;
+      const known = readStation(entity);
+      const sameStation = known?.eva === stop.eva && known?.network === stop.network;
+      const dests = new Set(sameStation ? known.dests ?? [] : []);
+      sensorRows(this._state)
+        .filter(departureFilter({ platforms: this._config.platforms }))
+        .forEach(({ dep }) => dests.add(normStation(dep.destination)));
+      dests.delete("");
+      const station = {
+        eva: stop.eva, network: stop.network, name: stop.name,
+        dests: [...dests].slice(-MAX_KNOWN_DESTINATIONS),
+      };
+      if (JSON.stringify(station) !== JSON.stringify(known)) saveStation(entity, station);
+    }
+
+    async _loadFallback() {
+      const station = readStation(this._config.entity);
+      if (!station || this._fallbackLoading || !this._hass) return;
+      this._fallbackLoading = true;
+      try {
+        const result = await this._hass.callWS({
+          type: "spdbf_nearby/board", eva: station.eva, network: station.network, name: station.name,
+        });
+        this._fallback = { time: Date.now(), result, error: null };
+      } catch (err) {
+        this._fallback = {
+          time: Date.now(), result: this._fallback?.result ?? null, error: err?.message || String(err),
+        };
+      } finally {
+        this._fallbackLoading = false;
         this._render();
       }
     }
@@ -388,10 +495,13 @@
       return document.createElement("spdbf-connection-card-editor");
     }
 
-    // The station as the departure dialog needs it, from a sensor's state.
+    // The station as the departure dialog needs it, from a sensor's state;
+    // the remembered one while the card's own sensor is unavailable.
     _stop(state = this._state, title = this._config.title) {
       const attrs = state?.attributes ?? {};
       const station = String(attrs.station ?? "");
+      const known = state === this._state && !station ? readStation(this._config.entity) : null;
+      if (known) return { name: known.name, eva: known.eva, network: known.network, colors: "berlin" };
       const first = (attrs.next_departures ?? [])[0];
       // HAFAS stop ids are numbers (BVG: 900...); IRIS stations are names.
       const network = first && !isIris(first) ? "BVG" : "DB";
@@ -467,18 +577,24 @@
     }
 
     _departures() {
-      if (!Array.isArray(this._state?.attributes?.next_departures)) return null;
-      const matches = departureFilter(this._config);
       const now = Date.now() / 1000;
       const max = Number(this._config.departures) || DEFAULT_DEPARTURES;
-      return sensorRows(this._state)
-        .filter((row) => matches(row)
-          && (row.dep.departure_timestamp == null || row.dep.departure_timestamp > now - 60))
-        .slice(0, max);
+      const recent = (row) => row.dep.departure_timestamp == null || row.dep.departure_timestamp > now - 60;
+      if (this._live()) {
+        const matches = departureFilter(this._config);
+        return sensorRows(this._state).filter((row) => matches(row) && recent(row)).slice(0, max);
+      }
+      const result = this._fallback?.result;
+      if (!result) return null;
+      const known = new Set(readStation(this._config.entity)?.dests ?? []);
+      const matches = departureFilter(this._config, known);
+      return (result.departures ?? []).map(boardRow)
+        .filter((row) => matches(row) && recent(row)).slice(0, max);
     }
 
     // What dbfCore.showTrip needs: the trip reference and the row's look.
     _tripDeparture({ dep, line }, stop) {
+      if (dep.spdbfTrip) return { line, destination: dep.destination, trip: dep.spdbfTrip };
       let trip = null;
       if (isIris(dep)) {
         const type = String(dep.train ?? "").trim().split(/\s+/)[0];
@@ -517,7 +633,7 @@
       const late = delay ? `<span class="late"> +${esc(delay)}</span>` : "";
       const main = cancelled ? "cancelled" : minutes === null ? scheduled : minutes === 0 ? "now" : `${minutes} min`;
       const platform = dep.platform ? `<small>Platform ${esc(dep.platform)}</small>` : "";
-      const tripClass = isIris(dep) ? dep.trainNumber : dep.trip_id || dep.tripId;
+      const tripClass = dep.spdbfTrip || (isIris(dep) ? dep.trainNumber : dep.trip_id || dep.tripId);
       const classes = [cancelled && "cancelled", tripClass && "trip"].filter(Boolean).join(" ");
       return `
         <li class="${classes}" data-index="${index}">
@@ -537,20 +653,44 @@
       const walk = this._linkRow(link);
       // Berlin S- and U-Bahn colours, as on BVG stops.
       const network = "BVG";
-      let body;
-      if (!this._state) {
-        body = `<div class="empty">Sensor ${esc(config.entity)} not found.</div>`;
-      } else {
-        this._rows = this._departures() ?? [];
-        body = this._rows.length
-          ? `<ul>${this._rows.map((item, i) => this._row(item, i, network)).join("")}</ul>`
-          : `<div class="empty">No departures right now.</div>`;
+      const live = this._live();
+      if (live) {
+        this._fallback = null;
+        this._remember();
+      } else if (!this._fallback || Date.now() - this._fallback.time > FALLBACK_REFRESH_MS) {
+        this._loadFallback();
       }
+      const known = live ? null : readStation(config.entity);
+      let body;
+      const rows = this._departures();
+      this._rows = rows ?? [];
+      if (!this._state && !known) {
+        body = `<div class="empty">Sensor ${esc(config.entity)} not found.</div>`;
+      } else if (!live && !known) {
+        body = `<div class="empty">The sensor is unavailable, and its station isn't known yet.</div>`;
+      } else if (!live && !this._fallback) {
+        body = `<div class="empty">The sensor is unavailable; loading the station's departures…</div>`;
+      } else if (this._rows.length) {
+        body = `<ul>${this._rows.map((item, i) => this._row(item, i, network)).join("")}</ul>`;
+      } else if (!live && !this._fallback.result) {
+        body = `<div class="empty">No departures: ${esc(this._fallback.error ?? "nothing known")}</div>`;
+      } else {
+        body = `<div class="empty">No departures right now.</div>`;
+      }
+      const down = core()?.status();
+      const notes = [];
+      if (down) notes.push(`Live data unavailable${down.since ? ` since ${clockOf(down.since)}` : ""}`);
+      if (!live && known) {
+        const origin = core()?.originNote(this._fallback?.result);
+        notes.push(origin || "Sensor unavailable");
+      }
+      const warn = notes.length ? `<div class="warn">${esc(notes.join(" · "))}</div>` : "";
       this.shadowRoot.innerHTML = `<style>${STYLE}</style>
         ${link?.below ? "" : walk}
         <ha-card>
           <header title="Show all departures"><ha-icon icon="${esc(icon)}"></ha-icon>
             <span class="title">${esc(title)}</span></header>
+          ${warn}
           ${body}
         </ha-card>
         ${link?.below ? walk : ""}`;

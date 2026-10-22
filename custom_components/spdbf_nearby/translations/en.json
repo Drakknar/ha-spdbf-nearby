@@ -16,8 +16,8 @@
           "merge_duplicates": "Merge duplicate stops",
           "merge_networks": "Merge DB and BVG stations",
           "scan_interval": "Departure refresh interval",
-          "fallback": "Use a public DBF instance while yours is unreachable",
-          "fallback_url": "Public DBF instance"
+          "fallback": "Use Transitous while DBF can't deliver",
+          "problem_after": "Report DBF as down after"
         },
         "data_description": {
           "server_url": "Address of the DBF Docker container on your network, e.g. http://192.168.1.10:8092.",
@@ -26,8 +26,8 @@
           "departures": "Set to 0 to show stops only, without departures.",
           "merge_duplicates": "Show one stop when several nearby stops have exactly the same departures, as BVG lists some stations several times (e.g. Alexanderplatz).",
           "merge_networks": "Show a DB station and the BVG S-/U-Bahn stop of the same station as one stop, e.g. Berlin Savignyplatz and S Savignyplatz. Its departures show all BVG lines plus the DB lines BVG doesn't list, such as regional trains.",
-          "fallback": "Off by default. The public instance runs stock DBF: it allows about 10 requests per minute, so only the nearest 3 stops keep updating, and it has no stop search and no coordinates for BVG stops. Your server is retried every minute and used again as soon as it answers.",
-          "fallback_url": "Only used when the option above is on.",
+          "fallback": "Transitous (transitous.org) is a free, community-run journey planner. While DBF is unreachable or its sources fail, departures, trips and the stop search come from there: live, but with fewer delays and platforms than DBF. When neither answers, the last known departures are shown. On the map only the 3 nearest stops ask Transitous.",
+          "problem_after": "DBF is checked every minute. When it has failed for this long, the DBF problem sensor turns on, a Repairs notice appears and the cards show a warning.",
           "map_stops": "Off: no stop entities and no polling. The stop search card, departure dialog and trip view still work, and \"near you\" uses the device's location or this person's."
         }
       }
@@ -57,16 +57,16 @@
           "merge_duplicates": "Merge duplicate stops",
           "merge_networks": "Merge DB and BVG stations",
           "scan_interval": "Departure refresh interval",
-          "fallback": "Use a public DBF instance while yours is unreachable",
-          "fallback_url": "Public DBF instance"
+          "fallback": "Use Transitous while DBF can't deliver",
+          "problem_after": "Report DBF as down after"
         },
         "data_description": {
           "sources": "DB uses DBF's built-in station list (DB InfraGO). Other entries are HAFAS services, e.g. BVG for Berlin buses, trams and U-Bahn.",
           "departures": "Set to 0 to show stops only, without departures.",
           "merge_duplicates": "Show one stop when several nearby stops have exactly the same departures, as BVG lists some stations several times (e.g. Alexanderplatz).",
           "merge_networks": "Show a DB station and the BVG S-/U-Bahn stop of the same station as one stop, e.g. Berlin Savignyplatz and S Savignyplatz. Its departures show all BVG lines plus the DB lines BVG doesn't list, such as regional trains.",
-          "fallback": "Off by default. The public instance runs stock DBF: it allows about 10 requests per minute, so only the nearest 3 stops keep updating, and it has no stop search and no coordinates for BVG stops. Your server is retried every minute and used again as soon as it answers.",
-          "fallback_url": "Only used when the option above is on.",
+          "fallback": "Transitous (transitous.org) is a free, community-run journey planner. While DBF is unreachable or its sources fail, departures, trips and the stop search come from there: live, but with fewer delays and platforms than DBF. When neither answers, the last known departures are shown. On the map only the 3 nearest stops ask Transitous.",
+          "problem_after": "DBF is checked every minute. When it has failed for this long, the DBF problem sensor turns on, a Repairs notice appears and the cards show a warning.",
           "map_stops": "Off: no stop entities and no polling. The stop search card, departure dialog and trip view still work, and \"near you\" uses the device's location or this person's."
         }
       }
@@ -83,8 +83,8 @@
       "description": "The DBF server at {server} returns HAFAS stops (such as BVG) without latitude and longitude, so they can't be shown on the map. DB stops still work.\n\nTo fix this, run the patched DBF image `ghcr.io/drakknar/db-fakedisplay` (see github.com/Drakknar/db-fakedisplay-patched). This notice disappears by itself once the server sends coordinates."
     },
     "server_unreachable": {
-      "title": "Your DBF server isn't reachable",
-      "description": "spdbf Public Transport couldn't reach the DBF server at {server} for several minutes ({reason}). It retries every minute.\n\n{fallback}\n\nCheck that the db-fakedisplay container is running. This notice disappears by itself once the server answers again."
+      "title": "DBF isn't delivering departures",
+      "description": "spdbf Public Transport hasn't had a working departure board from DBF at {server} since {since} ({reason}). It checks every minute.\n\n{fallback}\n\nIf DBF itself is unreachable, check that the db-fakedisplay container is running. If DBF answers with errors, DB's or a transport company's systems are failing, and there's nothing to fix on your side. This notice disappears by itself once DBF delivers again."
     }
   }
 }

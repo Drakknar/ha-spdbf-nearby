@@ -18,7 +18,7 @@ CONF_MERGE_DUPLICATES = "merge_duplicates"
 CONF_MERGE_NETWORKS = "merge_networks"
 CONF_MAP_STOPS = "map_stops"
 CONF_FALLBACK = "fallback"
-CONF_FALLBACK_URL = "fallback_url"
+CONF_PROBLEM_AFTER = "problem_after"
 
 DEFAULT_RADIUS = 1.0  # km
 DEFAULT_MAX_STOPS = 12
@@ -27,8 +27,8 @@ DEFAULT_SCAN_INTERVAL = 60  # seconds
 DEFAULT_MERGE_DUPLICATES = True
 DEFAULT_MERGE_NETWORKS = True
 DEFAULT_MAP_STOPS = True
-DEFAULT_FALLBACK = False
-DEFAULT_FALLBACK_URL = "https://dbf.finalrewind.org"
+DEFAULT_FALLBACK = True
+DEFAULT_PROBLEM_AFTER = 10  # minutes
 
 # "DB" means the IRIS station list built into DBF (DB InfraGO network).
 # Everything else is a HAFAS service name as accepted by DBF's ?hafas= parameter.
@@ -85,18 +85,40 @@ CONNECT_TIMEOUT = 5  # seconds; a server that is off fails fast
 MAX_PARALLEL_REQUESTS = 4  # DBF's default container runs a few workers
 
 # After your DBF server fails to answer, skip it for this long instead of
-# waiting for a timeout on every stop; a Repairs notice appears once it has
-# been unreachable for UNREACHABLE_ISSUE_AFTER.
+# waiting for a timeout on every stop.
 PRIMARY_RETRY_AFTER = timedelta(seconds=60)
-UNREACHABLE_ISSUE_AFTER = timedelta(minutes=5)
 
-# Optional public fallback while your server is unreachable. The public
-# instance runs stock DBF and asks for at most 10 requests per minute, so
-# requests are capped, only the nearest stops keep updating, and nothing is
-# looked up there that the map already has.
-FALLBACK_MAX_REQUESTS = 10
-FALLBACK_WINDOW = timedelta(minutes=1)
+# DBF status: one live board per network (past any cache in front of DBF)
+# every STATUS_INTERVAL. "Down for real" (the problem sensor, a Repairs
+# notice) once checks have failed for the problem_after option. Without map
+# stops of a network, these stations are asked; other networks are skipped.
+STATUS_INTERVAL = timedelta(seconds=60)
+STATUS_PROBE_ROWS = 5
+STATUS_STATIONS = {SOURCE_DB: "8011160", "BVG": "900003201"}  # Berlin Hbf
+# Makes each check's URL unique, so a cache in front of DBF can't answer it.
+STATUS_NOCACHE_PARAM = "spdbf_check"
+
+# Transitous, the fallback while DBF can't deliver (option "fallback").
+# Community-run: requests carry a User-Agent, boards are cached briefly and,
+# on the map, only the nearest stops ask it; the others show last known data.
+SOURCE_TRANSITOUS = "Transitous"
+TRANSITOUS_URL = "https://api.transitous.org/api"
+TRANSITOUS_RADIUS_METERS = 50  # the station's platforms, not nearby bus stops
+TRANSITOUS_MATCH_METERS = 500  # a DBF stop matches a Transitous stop this close
+TRANSITOUS_BOARD_CACHE_TTL = timedelta(seconds=60)
+TRANSITOUS_MAX_ROWS = 100
 FALLBACK_STOPS = 3
+USER_AGENT = (
+    f"spdbf-nearby-home-assistant/{FRONTEND_VERSION}"
+    " (+https://github.com/Drakknar/ha-spdbf-nearby)"
+)
+
+# Last good answers, shown when neither DBF nor Transitous answers.
+LAST_KNOWN_MAX_AGE = timedelta(hours=24)
+LAST_KNOWN_LIMITS = {"boards": 200, "trips": 100, "searches": 50, "rides": 50}
+LAST_KNOWN_SAVE_DELAY = 60  # seconds
+# A map stop's few rows don't replace a dialog's full board younger than this.
+LAST_KNOWN_BOARD_REFRESH = timedelta(minutes=5)
 
 ISSUE_MISSING_COORDINATES = "missing_coordinates"
 ISSUE_SERVER_UNREACHABLE = "server_unreachable"

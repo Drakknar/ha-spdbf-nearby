@@ -65,8 +65,8 @@ After installing or updating, reload the Home Assistant page or companion app on
 | Merge duplicate stops | on | Show one stop when nearby stops have exactly the same departures. Needs departures turned on. |
 | Show nearby stops on the map | on | Off: no stop entities and no polling. The search card, departures and trips still work; "near you" uses the device's location or the followed person's. |
 | Merge DB and BVG stations | on | Show a DB station and the BVG S-/U-Bahn stop of the same name, at most 300 m apart, as one stop. Bus and tram stops stay separate. |
-| Use a public DBF instance while yours is unreachable | off | See [When your DBF server is down](#when-your-dbf-server-is-down). |
-| Public DBF instance | `https://dbf.finalrewind.org` | The instance used for that. |
+| Use Transitous while DBF can't deliver | on | See [When DBF can't deliver](#when-dbf-cant-deliver). |
+| Report DBF as down after | 10 min | How long DBF must fail before the problem sensor, a Repairs notice and the cards' warning appear. |
 | Departure refresh interval | 60 s | How often departures are updated. |
 
 Stops are searched again after you move more than 100 m, or every 15 minutes. Location fixes less accurate than 250 m are ignored.
@@ -77,7 +77,7 @@ The stops appear on the built-in **Map** panel with no setup. For a dashboard, [
 
 ### Stop search card
 
-Dashboard → Edit → **Add card** → **spdbf stop search** (under custom cards). The integration loads the card itself, so there's no dashboard resource to add. Its options have a visual editor. It fits under a heading card in a sections dashboard.
+Dashboard → Edit → **Add card** → **spdbf stop search** (under custom cards). The integration loads the card itself and adds its own dashboard resource (see [Card loading](#card-loading)), so there's nothing to add by hand. Its options have a visual editor. It fits under a heading card in a sections dashboard.
 
 In YAML:
 
@@ -102,17 +102,18 @@ Each stop is a `geo_location` entity with these attributes:
 | `network` | `DB` or the HAFAS network name |
 | `eva` | Station ID |
 | `distance_km` | Live distance to you |
-| `departures` | List of `line`, `destination`, `platform`, `scheduled`, `delay`, `minutes`, `cancelled` |
+| `departures` | List of `line`, `destination`, `platform`, `scheduled`, `delay`, `minutes`, `cancelled`, `expected` (ISO time) |
 | `next_departure` | For example `S3 → Spandau in 4 min` |
 | `url` | Link to the DBF departure board |
 | `merged_stops` | Names of nearby stops merged into this one: the same board, or the same station in DB |
 | `networks` | For a merged DB + BVG station: the networks its departures come from, e.g. `["BVG", "DB"]` |
 | `departures_via` | The source the departures came from, when DBF's DB source was empty and the integration used its fallback (ÖBB) |
 | `departures_error` | Why no departures could be fetched, if no source had any |
+| `fallback`, `origin`, `as_of` | Only while DBF can't deliver: `origin` is `transitous` or `last_known`, and `as_of` when last known departures were fetched |
 
 ### Connection card
 
-For the connections you use: one card per stop, from a [db_infoscreen](https://github.com/FaserF/ha-db_infoscreen) departures sensor. Dashboard → Edit → **Add card** → **spdbf connection**, with a visual editor; no dashboard resource to add.
+For the connections you use: one card per stop, from a [db_infoscreen](https://github.com/FaserF/ha-db_infoscreen) departures sensor. Dashboard → Edit → **Add card** → **spdbf connection**, with a visual editor; no dashboard resource to add by hand.
 
 - **Departures** with line colours (Berlin S- and U-Bahn), platform, minutes, delay and cancellations, the same look as the departure dialog.
 - **Tap a departure** for its trip, or the title for the stop's full board.
@@ -122,6 +123,7 @@ For the connections you use: one card per stop, from a [db_infoscreen](https://g
   - **Last leg:** instead, type a station on the line into "Or ride to a station", e.g. where you get off: "↓ 6 min ride to S Schönhauser Allee · 10 min walk". The name is matched without the S/U prefix and the town in brackets; write the mode as a prefix ("U Schönhauser Allee").
   - **Walk:** the minutes you enter after the ride: the change to the next card's platform, or on from the station.
   - **Before 0.8.0** the row sat above the second card (`ride_from`, the previous card's sensor). That still works on a card without `ride_to` or `ride_to_station`.
+- **When the sensor is unavailable** (DBF down for longer than any cache in front of it covers), the card shows the station's departures from the integration instead: from DBF, else Transitous, else the last known ones, and says which. It remembers the station, and the destinations seen on its platforms, while the sensor works. Transitous rarely knows S-Bahn platforms, so those destinations then stand for the direction.
 
 ```yaml
 type: custom:spdbf-connection-card
@@ -148,19 +150,31 @@ Tapping a departure in the dialog shows its trip: every stop with its time, dela
 
 Other cards can use the same dialog, trip view and line colours through `window.dbfCore` (see CLAUDE.md).
 
-## When your DBF server is down
+## When DBF can't deliver
+
+DBF fails in two ways: your server is unreachable, or it answers with errors because DB's or a transport company's systems fail. For every board, trip, search and ride the integration then uses, in this order:
+
+1. **DBF**, as long as it delivers. A board that is merely empty (no service right now) counts.
+2. **[Transitous](https://transitous.org)** (option on by default): a free, community-run, Europe-wide journey planner. Its data is live, but has fewer delays and platforms than DBF (in Berlin it misses many S-Bahn delays and most S-Bahn platforms). Trips of Transitous departures come from Transitous too; a DB or BVG trip can't be looked up there.
+3. **The last known answer** for the same board, trip, search or ride, up to 24 hours old, kept in Home Assistant's storage. Departures that have left are dropped, and the minutes are counted from now.
+
+The dialog, the cards and the stop entities say where the data comes from: "from Transitous (DBF can't deliver)" or "last known, as of 14:05".
 
 - **Fails fast:** after one failed request, your server is skipped for a minute and then tried again. You don't wait for a timeout at every stop.
-- **Stops stay on the map:** each stop's dialog and `departures_error` say the server isn't reachable. If the server is down when Home Assistant starts, the integration retries setup by itself.
-- **Long outages:** after 5 minutes a Repairs notice appears. It disappears once the server answers again.
+- **Map stops:** stops already on the map stay. Only the 3 nearest ask Transitous; the others show their last known departures. New stops are only looked up in DBF. If the server is down when Home Assistant starts, the integration retries setup by itself.
+- **Status checks:** every minute the integration fetches one live board per network from DBF (Berlin Hbf for DB and BVG, else the nearest map stop of that network), past any cache in front of DBF. When a network's checks have failed for the "Report DBF as down after" time (10 minutes by default):
+  - `binary_sensor.spdbf_dbf_problem` turns on (device class *problem*; attributes `failing_since` and, per network, since when and why);
+  - a Repairs notice appears;
+  - the cards and the dialog show "Live data from DBF unavailable since 14:05".
+
+  All three clear by themselves once DBF delivers again. Use the sensor for your own notifications.
 - **You can still change settings:** the options can be saved while your server is down, as long as you keep its URL.
 
-**Public fallback (off by default).** When it's on, departures come from the public instance until your server is back. The stops and the dialog then say "from the public DBF".
+## Card loading
 
-The public instance runs stock DBF and asks for at most 10 requests per minute, so:
-- **Fewer updates:** only the 3 nearest stops keep updating. The dialog still loads full boards within that budget.
-- **No new stops while you have some:** stops already on the map stay. Stops are only looked up there if the map has none, and then only DB stations appear, because stock DBF sends no coordinates for BVG stops.
-- **No stop search:** the search card needs your own server.
+Home Assistant loads the cards through an "extra module" on every page, which the departure dialog needs too. It imports that module only once, when the page opens: if that one import fails (the companion app opening before the network or VPN is up, a browser restoring tabs after sleep), the cards show "Configuration error" until you reload. So the integration also adds the same loader as a dashboard resource, which Home Assistant imports again whenever a dashboard loads. The loader runs once per page either way, and retries the cards' files until they load.
+
+The resource is only added in storage mode (the default; in YAML mode resources are yours to manage), is updated with each release, and is removed when you delete the integration's last entry. Delete the entry before uninstalling through HACS, or remove the resource `/spdbf_nearby/spdbf-loader.js` by hand afterwards.
 
 ## Notes
 
@@ -170,7 +184,7 @@ The public instance runs stock DBF and asks for at most 10 requests per minute, 
 
 ## Development
 
-There are no automated tests yet. How the integration works, how changes have been checked, and the open items are in [`custom_components/spdbf_nearby/CLAUDE.md`](custom_components/spdbf_nearby/CLAUDE.md).
+There are no automated tests in the repository; changes are checked with a scratch pytest run against Home Assistant's test harness. How the integration works, how changes have been checked, and the open items are in [`custom_components/spdbf_nearby/CLAUDE.md`](custom_components/spdbf_nearby/CLAUDE.md).
 
 ## License
 

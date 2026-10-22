@@ -11,7 +11,7 @@ from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 
-from .const import DOMAIN, FRONTEND_VERSION, STATIC_URL
+from .const import DOMAIN, FRONTEND_VERSION, SOURCE_TRANSITOUS, STATIC_URL
 from .coordinator import SpdbfCoordinator
 from .dbf import DbfError, ServerUnreachable
 from .stations import Position, Stop
@@ -137,10 +137,14 @@ async def ws_search(
     pos = _position(msg)
 
     async def search() -> dict[str, Any]:
-        stops = await coordinator.client.async_search(
+        stops, origin, as_of = await coordinator.client.async_search(
             msg["query"], pos or coordinator.tracked_position()
         )
-        return {"stops": [_stop_json(coordinator, stop, pos) for stop in stops]}
+        return {
+            "stops": [_stop_json(coordinator, stop, pos) for stop in stops],
+            "origin": origin,
+            "as_of": as_of,
+        }
 
     await _reply(connection, msg, search())
 
@@ -172,6 +176,9 @@ async def ws_nearby(
         vol.Optional("linked"): [
             {vol.Required("eva"): str, vol.Required("network"): str}
         ],
+        # To find the stop on Transitous while DBF can't deliver.
+        vol.Optional("name"): str,
+        **_POSITION,
         _ENTRY: str,
     }
 )
@@ -184,12 +191,15 @@ async def ws_board(
         return
     linked = msg.get("linked")
     networks = {msg["network"], *(item["network"] for item in linked or [])}
-    if _bad_networks(coordinator, connection, msg, networks):
+    # Transitous stops come from the stop search while DBF can't deliver.
+    if _bad_networks(coordinator, connection, msg, networks, frozenset({SOURCE_TRANSITOUS})):
         return
     board = await coordinator.async_board(
         msg["eva"],
         msg["network"],
         None if linked is None else [(item["eva"], item["network"]) for item in linked],
+        name=msg.get("name"),
+        pos=_position(msg),
     )
     connection.send_result(
         msg["id"],
@@ -198,10 +208,10 @@ async def ws_board(
             "departures_error": board.error,
             "departures_via": board.via,
             "fallback": board.fallback,
+            "origin": board.origin,
+            "as_of": board.as_of.isoformat() if board.as_of else None,
             "server_unreachable": board.unreachable,
-            "url": coordinator.client.board_url(
-                msg["eva"], msg["network"], board.via, board.fallback
-            ),
+            "url": coordinator.client.board_url(msg["eva"], msg["network"], board.via),
         },
     )
 
@@ -209,6 +219,7 @@ async def ws_board(
 _TRIP = vol.Any(
     {vol.Required("id"): str, vol.Required("hafas"): str},
     {vol.Required("train"): str, vol.Required("station"): str},
+    {vol.Required("transitous"): str},
 )
 _STATION = {vol.Optional("eva"): str, vol.Optional("name"): str}
 

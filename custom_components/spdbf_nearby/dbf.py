@@ -1,13 +1,13 @@
-"""Talking to DBF: requests, outages and the public fallback, boards, trips.
+"""Talking to DBF: requests, outages, boards, trips, status checks.
 
 Shared by every feature of the integration (the map's nearby stops, the
-stop search card, the departure dialog and its trip view).
+stop search card, the departure dialog and its trip view). What to show
+when DBF can't deliver (Transitous, last known data) is service.py's job.
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 from datetime import datetime, timedelta, tzinfo
 import logging
 from typing import Any
@@ -25,23 +25,16 @@ from .const import (
     BOARD_CACHE_TTL,
     BOARD_DEPARTURES,
     BOARD_ROWS,
-    CONF_FALLBACK,
-    CONF_FALLBACK_URL,
     CONF_MERGE_NETWORKS,
     CONF_PUBLIC_URL,
     CONF_SERVER_URL,
     CONF_SOURCES,
     CONNECT_TIMEOUT,
     DB_FALLBACK_HAFAS,
-    DEFAULT_FALLBACK,
-    DEFAULT_FALLBACK_URL,
     DEFAULT_MERGE_NETWORKS,
     DOMAIN,
-    FALLBACK_MAX_REQUESTS,
-    FALLBACK_WINDOW,
     IRIS_TIME_ZONE,
     ISSUE_MISSING_COORDINATES,
-    ISSUE_SERVER_UNREACHABLE,
     MAX_PARALLEL_REQUESTS,
     PRIMARY_RETRY_AFTER,
     REQUEST_TIMEOUT,
@@ -49,7 +42,9 @@ from .const import (
     RIDE_MAX_TRIPS,
     SEARCH_MAX_RESULTS,
     SOURCE_DB,
-    UNREACHABLE_ISSUE_AFTER,
+    SOURCE_TRANSITOUS,
+    STATUS_NOCACHE_PARAM,
+    STATUS_PROBE_ROWS,
 )
 from .stations import (
     Board,
@@ -75,25 +70,19 @@ class DbfError(Exception):
 
 
 class ServerUnreachable(DbfError):
-    """No DBF server could be asked: yours is down and no fallback could step in."""
+    """Your DBF server can't be asked right now."""
 
 
 class DbfClient:
-    """Your DBF server, with fast failure and an optional public fallback."""
+    """Your DBF server, with fast failure while it is down."""
 
-    def __init__(self, hass: HomeAssistant, config: dict[str, Any], entry_id: str) -> None:
+    def __init__(self, hass: HomeAssistant, config: dict[str, Any]) -> None:
         """Initialize the client from the entry's settings."""
         self.hass = hass
-        self._entry_id = entry_id
         self._session = async_get_clientsession(hass)
         self.server = config[CONF_SERVER_URL].rstrip("/")
         # Links default to the server URL when no public URL is set.
         self._public = (config.get(CONF_PUBLIC_URL) or self.server).rstrip("/")
-        self._fallback: str | None = None
-        if config.get(CONF_FALLBACK, DEFAULT_FALLBACK):
-            self._fallback = (
-                config.get(CONF_FALLBACK_URL) or DEFAULT_FALLBACK_URL
-            ).rstrip("/")
         self.sources: list[str] = config[CONF_SOURCES]
         self.merge_networks = bool(config.get(CONF_MERGE_NETWORKS, DEFAULT_MERGE_NETWORKS))
         self._semaphore = asyncio.Semaphore(MAX_PARALLEL_REQUESTS)
@@ -101,28 +90,25 @@ class DbfClient:
         self._coordinate_issue: bool | None = None
         self._boards: dict[str, tuple[datetime, Board]] = {}
         self._rides: dict[str, tuple[datetime, dict[str, Any] | None]] = {}
-        # Reachability of your server, and the fallback's request budget.
+        # Reachability of your server.
         self._down_since: datetime | None = None
         self._down_reason = ""
         self._retry_at: datetime | None = None
-        self._unreachable_issue = False
-        self._fallback_requests: deque[datetime] = deque()
 
     async def async_setup(self) -> None:
         """Load the IRIS time zone without blocking the event loop."""
         self._iris_tz = await dt_util.async_get_time_zone(IRIS_TIME_ZONE)
 
     @property
-    def fallback_active(self) -> bool:
-        """Return whether your server is down and the public fallback steps in."""
-        return self._fallback is not None and self._down_since is not None
+    def down(self) -> bool:
+        """Return whether your server failed to answer lately."""
+        return self._down_since is not None
 
-    def board_url(
-        self, eva: str, source: str, via: str | None = None, fallback: bool = False
-    ) -> str:
-        """Return the departure board URL for a stop."""
-        base = self._fallback if fallback and self._fallback else self._public
-        url = f"{base}/{quote(eva)}"
+    def board_url(self, eva: str, source: str, via: str | None = None) -> str | None:
+        """Return the departure board URL for a stop (none for Transitous stops)."""
+        if source == SOURCE_TRANSITOUS:
+            return None
+        url = f"{self._public}/{quote(eva)}"
         hafas = via or (None if source == SOURCE_DB else source)
         if hafas:
             url += f"?hafas={quote(hafas)}"
@@ -130,13 +116,10 @@ class DbfClient:
 
     # --- Requests -------------------------------------------------------
 
-    async def request_json(
-        self, method: str, path: str, *, allow_fallback: bool = True, **kwargs: Any
-    ) -> tuple[Any, bool]:
-        """Ask your DBF server, or the public fallback while yours is down.
+    async def request_json(self, method: str, path: str, **kwargs: Any) -> Any:
+        """Ask your DBF server.
 
-        Returns the JSON answer and whether it came from the fallback. After
-        a failure your server is skipped for PRIMARY_RETRY_AFTER, so an outage
+        After a failure it is skipped for PRIMARY_RETRY_AFTER, so an outage
         costs one timeout, not one per stop.
         """
         if self._retry_at is None or dt_util.utcnow() >= self._retry_at:
@@ -146,18 +129,10 @@ class DbfClient:
                 self._mark_down(str(err))
             else:
                 self._mark_up()
-                return payload, False
-
-        message = f"Your DBF server at {self.server} isn't reachable ({self._down_reason})"
-        if not (self._fallback and allow_fallback):
-            raise ServerUnreachable(message)
-        self._take_fallback_slot()
-        try:
-            return await self._send(method, self._fallback + path, **kwargs), True
-        except ServerUnreachable as err:
-            raise ServerUnreachable(
-                f"{message}, and neither is the fallback {self._fallback} ({err})"
-            ) from err
+                return payload
+        raise ServerUnreachable(
+            f"Your DBF server at {self.server} isn't reachable ({self._down_reason})"
+        )
 
     async def _send(self, method: str, url: str, **kwargs: Any) -> Any:
         try:
@@ -181,19 +156,6 @@ class DbfClient:
         except (aiohttp.ClientError, ValueError) as err:
             raise DbfError(str(err) or type(err).__name__) from err
 
-    def _take_fallback_slot(self) -> None:
-        """Count a fallback request, or refuse it if the budget is used up."""
-        now = dt_util.utcnow()
-        while self._fallback_requests and now - self._fallback_requests[0] > FALLBACK_WINDOW:
-            self._fallback_requests.popleft()
-        if len(self._fallback_requests) >= FALLBACK_MAX_REQUESTS:
-            raise ServerUnreachable(
-                f"Your DBF server at {self.server} isn't reachable, and the public"
-                f" fallback's limit of {FALLBACK_MAX_REQUESTS} requests per minute"
-                " is used up; try again shortly"
-            )
-        self._fallback_requests.append(now)
-
     @callback
     def _mark_down(self, reason: str) -> None:
         now = dt_util.utcnow()
@@ -202,33 +164,9 @@ class DbfClient:
         if self._down_since is None:
             self._down_since = now
             _LOGGER.warning(
-                "DBF server at %s isn't reachable (%s); %s",
+                "DBF server at %s isn't reachable (%s); retrying every minute",
                 self.server,
                 reason,
-                f"using {self._fallback} until it is back"
-                if self._fallback
-                else "retrying every minute",
-            )
-        if not self._unreachable_issue and now - self._down_since >= UNREACHABLE_ISSUE_AFTER:
-            self._unreachable_issue = True
-            ir.async_create_issue(
-                self.hass,
-                DOMAIN,
-                f"{ISSUE_SERVER_UNREACHABLE}_{self._entry_id}",
-                is_fixable=False,
-                severity=ir.IssueSeverity.WARNING,
-                translation_key=ISSUE_SERVER_UNREACHABLE,
-                translation_placeholders={
-                    "server": self.server,
-                    "reason": reason,
-                    "fallback": (
-                        f"Departures come from the public fallback {self._fallback}"
-                        " for now, for the nearest stops only."
-                        if self._fallback
-                        else "You can turn on the public fallback in the"
-                        " integration's options to keep departures coming meanwhile."
-                    ),
-                },
             )
 
     @callback
@@ -238,37 +176,49 @@ class DbfClient:
         _LOGGER.info("DBF server at %s is reachable again", self.server)
         self._down_since = self._retry_at = None
         self._down_reason = ""
-        # Fallback boards and lookups are replaced by your server's.
-        self._boards.clear()
-        if self._unreachable_issue:
-            self._unreachable_issue = False
-            ir.async_delete_issue(
-                self.hass, DOMAIN, f"{ISSUE_SERVER_UNREACHABLE}_{self._entry_id}"
-            )
+
+    async def async_check(self, eva: str, source: str) -> str | None:
+        """Fetch one live board; return why it failed, or None if DBF works.
+
+        The URL is unique per check, so a cache in front of DBF (which keeps
+        serving old boards while DBF fails) can't answer it. DBF's own
+        "no data" answers (HTTP 300) count as working; server errors,
+        timeouts and gateway errors don't. A check always reaches the
+        server, also inside the fast-fail window, and ends it on success.
+        """
+        params = {
+            "mode": "json",
+            "limit": str(STATUS_PROBE_ROWS),
+            STATUS_NOCACHE_PARAM: str(int(dt_util.utcnow().timestamp())),
+        }
+        if source != SOURCE_DB:
+            params["hafas"] = source
+        try:
+            await self._send("GET", f"{self.server}/{quote(eva)}", params=params)
+        except ServerUnreachable as err:
+            self._mark_down(str(err))
+            return str(err)
+        except DbfError as err:
+            return str(err)
+        self._mark_up()
+        return None
 
     # --- Stops ----------------------------------------------------------
 
-    async def fetch_candidates(
-        self, form: dict[str, str], *, allow_fallback: bool = True
-    ) -> tuple[list[Stop], bool]:
+    async def fetch_candidates(self, form: dict[str, str]) -> list[Stop]:
         """Ask /_geolocation once per HAFAS source.
 
-        Returns the stops of the configured sources in DBF's order, and
-        whether the answer came from the fallback.
+        Returns the stops of the configured sources in DBF's order.
         """
         # Every /_geolocation call also returns the IRIS (DB) stations, so one
         # call per HAFAS service covers DB too.
         services = [s for s in self.sources if s != SOURCE_DB]
         candidates: list[dict[str, Any]] = []
-        via_fallback = False
         for service in services or [None]:
             data = dict(form)
             if service:
                 data["hafas"] = service
-            payload, from_fallback = await self.request_json(
-                "POST", "/_geolocation", data=data, allow_fallback=allow_fallback
-            )
-            via_fallback |= from_fallback
+            payload = await self.request_json("POST", "/_geolocation", data=data)
             if not isinstance(payload, dict):
                 raise DbfError("Unexpected answer from DBF")
             if payload.get("error"):
@@ -294,19 +244,16 @@ class DbfClient:
                 longitude=float(cand["lon"]),
             )
             stops.setdefault(stop.key, stop)
-        # The public instance never sends HAFAS coordinates; that's no
-        # reason to tell you to patch your own server.
-        if "lat" in form and not via_fallback:
+        if "lat" in form:
             self._set_coordinate_issue(missing_coordinates)
-        return list(stops.values()), via_fallback
+        return list(stops.values())
 
     async def async_search(self, query: str, pos: Position | None) -> list[Stop]:
         """Return the stops whose name matches, best matches first."""
         try:
-            # Stock DBF (the public fallback) can't search by name as JSON.
-            stops, _ = await self.fetch_candidates({"q": query}, allow_fallback=False)
-        except ServerUnreachable as err:
-            raise ServerUnreachable(f"Search needs your own DBF server. {err}") from err
+            stops = await self.fetch_candidates({"q": query})
+        except ServerUnreachable:
+            raise
         except DbfError as err:
             if "lon/lat" in str(err):
                 raise DbfError(
@@ -316,11 +263,9 @@ class DbfClient:
             raise
         if self.merge_networks:
             stops = link_networks(stops)
-
-        def distance(stop: Stop) -> float | None:
-            return distance_m(stop, pos)
-
-        return rank_search(stops, query, distance)[:SEARCH_MAX_RESULTS]
+        return rank_search(stops, query, lambda stop: distance_m(stop, pos))[
+            :SEARCH_MAX_RESULTS
+        ]
 
     @callback
     def _set_coordinate_issue(self, missing: bool) -> None:
@@ -355,9 +300,6 @@ class DbfClient:
         linked lists the same station in other networks as (eva, source);
         their missing lines are included.
         """
-        # The public fallback's requests are scarce: own board only.
-        if self.fallback_active:
-            linked = []
         key = "+".join(f"{s}_{e}" for e, s in [(eva, source), *linked])
         now = dt_util.utcnow()
         if (cached := self._boards.get(key)) and now - cached[0] < BOARD_CACHE_TTL:
@@ -381,11 +323,9 @@ class DbfClient:
         linked: list[tuple[str, str]] | None = None,
     ) -> Board:
         """Return a stop's departures, with the missing lines of linked stops."""
-        # The public fallback's requests are scarce: own board only.
-        linked = [] if self.fallback_active else linked or []
         board, *others = await asyncio.gather(
             self._fetch_stop_departures(eva, source, rows, keep),
-            *(self._fetch_stop_departures(e, s, rows, keep) for e, s in linked),
+            *(self._fetch_stop_departures(e, s, rows, keep) for e, s in linked or []),
         )
         return combine_boards(board, others, keep) if others else board
 
@@ -401,41 +341,37 @@ class DbfClient:
             attempts = [(source, self._parse_hafas)]
 
         errors = []
+        failed = False
         for hafas, parse in attempts:
             try:
-                departures, error, fallback = await self._fetch_board(
-                    eva, hafas, parse, rows
-                )
+                departures, error = await self._fetch_board(eva, hafas, parse, rows)
             except ServerUnreachable as err:
                 # No point trying the next backend on the same server.
                 return Board(error=str(err), unreachable=True)
             except DbfError as err:
                 _LOGGER.debug("Departures for %s (%s) failed: %s", eva, hafas, err)
                 errors.append(str(err))
+                failed = True
                 continue
             if departures:
                 return Board(
                     departures=departures[:keep],
                     via=hafas if hafas != source else None,
-                    fallback=fallback,
                 )
             if error:
                 errors.append(error)
-        return Board(error="; ".join(errors) or None)
+        return Board(error="; ".join(errors) or None, failed=failed)
 
     async def _fetch_board(
         self, eva: str, hafas: str | None, parse: Any, rows: int
-    ) -> tuple[list[dict[str, Any]], str | None, bool]:
-        """Return a stop's departures from one backend, its error if any, and
-        whether they came from the fallback."""
+    ) -> tuple[list[dict[str, Any]], str | None]:
+        """Return a stop's departures from one backend, and its error if any."""
         params = {"mode": "json", "limit": str(rows)}
         if hafas:
             params["hafas"] = hafas
-        payload, fallback = await self.request_json(
-            "GET", f"/{quote(eva)}", params=params
-        )
+        payload = await self.request_json("GET", f"/{quote(eva)}", params=params)
         if not isinstance(payload, dict):
-            return [], "unexpected response from spdbf", fallback
+            return [], "unexpected response from spdbf"
 
         now = dt_util.now()
         departures = [
@@ -445,7 +381,7 @@ class DbfClient:
         ]
         departures.sort(key=lambda dep: dep["minutes"])
         # DBF answers HTTP 300 with an "error" field when a backend has no data.
-        return departures, payload.get("error"), fallback
+        return departures, payload.get("error")
 
     def _parse_iris(
         self, raw: dict[str, Any], now: datetime, eva: str, hafas: str | None
@@ -489,13 +425,10 @@ class DbfClient:
         """Return a trip's stops, from the trip reference of a departure."""
         if trip.get("id"):
             path = f"/z/{quote(trip['id'], safe='')}.json"
-            payload, fallback = await self.request_json(
-                "GET", path, params={"hafas": trip["hafas"]}
-            )
-            return _hafas_trip(payload, fallback)
+            payload = await self.request_json("GET", path, params={"hafas": trip["hafas"]})
+            return _hafas_trip(payload)
         path = f"/z/{quote(trip['train'], safe='')}/{quote(trip['station'], safe='')}.json"
-        payload, fallback = await self.request_json("GET", path)
-        return _iris_trip(payload, fallback)
+        return _iris_trip(await self.request_json("GET", path))
 
     async def async_ride(
         self, start: dict[str, str], end: dict[str, str], lines: list[str] | None = None
@@ -528,6 +461,8 @@ class DbfClient:
             return None
         eva, service = hafas
         board = await self.fetch_departures(eva, service, 40, 40)
+        if board.unreachable:
+            raise ServerUnreachable(board.error or "DBF isn't reachable")
         wanted = {line_key(line) for line in lines}
         tried = 0
         for dep in board.departures:
@@ -551,7 +486,7 @@ class DbfClient:
             return station["eva"], network
         if not station.get("name"):
             return None
-        stops, _ = await self.fetch_candidates({"q": station["name"]}, allow_fallback=False)
+        stops = await self.fetch_candidates({"q": station["name"]})
         for stop in link_networks(stops):
             members = [stop, *stop.linked]
             if stop.source != SOURCE_DB and any(
@@ -587,6 +522,8 @@ def _departure(
         "delay": delay,
         "minutes": max(0, int((expected - now).total_seconds() // 60)),
         "cancelled": bool(raw.get("isCancelled")),
+        # Absolute, so a kept board can be shown later (last_known.py).
+        "expected": dt_util.as_local(expected).isoformat(),
     }
     if trip:
         dep["trip"] = trip
@@ -655,7 +592,7 @@ def _iso(epoch: Any) -> str | None:
     return dt_util.as_local(dt_util.utc_from_timestamp(int(epoch))).isoformat()
 
 
-def _hafas_trip(payload: Any, fallback: bool) -> dict[str, Any]:
+def _hafas_trip(payload: Any) -> dict[str, Any]:
     journey = payload.get("journey") if isinstance(payload, dict) else None
     if not isinstance(journey, dict):
         raise DbfError(
@@ -685,11 +622,10 @@ def _hafas_trip(payload: Any, fallback: bool) -> dict[str, Any]:
         "stops": stops,
         "times": True,
         "messages": messages,
-        "fallback": fallback,
     }
 
 
-def _iris_trip(payload: Any, fallback: bool) -> dict[str, Any]:
+def _iris_trip(payload: Any) -> dict[str, Any]:
     """Return a DB trip.
 
     The stop names (route_pre, route_post) come from IRIS and belong to this
@@ -759,5 +695,4 @@ def _iris_trip(payload: Any, fallback: bool) -> dict[str, Any]:
         "stops": stops,
         "times": timed,
         "messages": [],
-        "fallback": fallback,
     }
