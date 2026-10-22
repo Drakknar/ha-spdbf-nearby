@@ -29,8 +29,9 @@
 // card's sensor); a card with ride_from and neither ride_to option still
 // shows it that way.
 //
-// While the sensor is unavailable (DBF down longer than any cache in front of
-// it covers), the card asks the integration for the station's board instead:
+// While the sensor is unavailable, or DBF is down for real (db_infoscreen then
+// keeps showing its last board, ageing), the card asks the integration for the
+// station's board instead:
 // DBF, else Transitous, else the last known departures, and says which. It
 // remembers the station, and the destinations seen on its platforms, while the
 // sensor works; Transitous often has no platforms, so those destinations stand
@@ -39,7 +40,7 @@
   if (customElements.get("spdbf-connection-card")) return;
 
   const TICK_MS = 30000; // keeps "in N min" current between sensor updates
-  const FALLBACK_REFRESH_MS = 60000; // the station's board while the sensor is unavailable
+  const FALLBACK_REFRESH_MS = 60000; // the station's board while the card falls back
   const STATION_KEY = "spdbf-connection-station:"; // + entity id, in localStorage
   const MAX_KNOWN_DESTINATIONS = 40;
   const RIDE_REFRESH_MS = 10 * 60000; // scheduled ride times hardly change
@@ -383,7 +384,7 @@
       this._timer = null;
       this._rows = [];
       this._ride = null; // { key, time, result }
-      this._fallback = null; // { time, result, error } while the sensor is unavailable
+      this._fallback = null; // { time, result, error } while the card falls back
       this._fallbackLoading = false;
       this._downKey = "";
     }
@@ -419,11 +420,13 @@
       }
     }
 
-    // The sensor delivers (also "no departures right now").
+    // The sensor delivers (also "no departures right now"). Not while DBF is
+    // down for real: db_infoscreen then keeps its last board without saying
+    // so (checked live 2026-10-22), so the integration's board is better.
     _live() {
       const state = this._state;
       return Boolean(state) && state.state !== "unavailable" && state.state !== "unknown"
-        && Array.isArray(state.attributes?.next_departures);
+        && Array.isArray(state.attributes?.next_departures) && !core()?.status();
     }
 
     // Remembers the station and the destinations on the chosen platforms.
@@ -667,9 +670,9 @@
       if (!this._state && !known) {
         body = `<div class="empty">Sensor ${esc(config.entity)} not found.</div>`;
       } else if (!live && !known) {
-        body = `<div class="empty">The sensor is unavailable, and its station isn't known yet.</div>`;
+        body = `<div class="empty">No live data, and the sensor's station isn't known yet.</div>`;
       } else if (!live && !this._fallback) {
-        body = `<div class="empty">The sensor is unavailable; loading the station's departures…</div>`;
+        body = `<div class="empty">Loading the station's departures…</div>`;
       } else if (this._rows.length) {
         body = `<ul>${this._rows.map((item, i) => this._row(item, i, network)).join("")}</ul>`;
       } else if (!live && !this._fallback.result) {
@@ -684,9 +687,10 @@
       if (down) notes.push(`Live data unavailable${down.since ? ` since ${clockOf(down.since)}` : ""}`);
       if (!live && known) {
         const origin = core()?.originNote(this._fallback?.result);
-        notes.push(origin || "Sensor unavailable");
+        notes.push(origin || (down ? "" : "Sensor unavailable"));
       }
-      const warn = notes.length ? `<div class="warn">${esc(notes.join(" · "))}</div>` : "";
+      const shownNotes = notes.filter(Boolean);
+      const warn = shownNotes.length ? `<div class="warn">${esc(shownNotes.join(" · "))}</div>` : "";
       this.shadowRoot.innerHTML = `<style>${STYLE}</style>
         ${link?.below ? "" : walk}
         <ha-card>

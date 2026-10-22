@@ -108,6 +108,9 @@ TRANSITOUS_MATCH_METERS = 500  # a DBF stop matches a Transitous stop this close
 TRANSITOUS_BOARD_CACHE_TTL = timedelta(seconds=60)
 TRANSITOUS_MAX_ROWS = 100
 FALLBACK_STOPS = 3
+# The other map stops show last known boards; when those run out (map stops
+# keep a few rows), each asks Transitous at most this often.
+PAUSED_STOP_REFRESH = timedelta(minutes=5)
 USER_AGENT = (
     f"spdbf-nearby-home-assistant/{FRONTEND_VERSION}"
     " (+https://github.com/Drakknar/ha-spdbf-nearby)"

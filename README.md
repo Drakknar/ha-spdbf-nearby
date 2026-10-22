@@ -123,7 +123,7 @@ For the connections you use: one card per stop, from a [db_infoscreen](https://g
   - **Last leg:** instead, type a station on the line into "Or ride to a station", e.g. where you get off: "↓ 6 min ride to S Schönhauser Allee · 10 min walk". The name is matched without the S/U prefix and the town in brackets; write the mode as a prefix ("U Schönhauser Allee").
   - **Walk:** the minutes you enter after the ride: the change to the next card's platform, or on from the station.
   - **Before 0.8.0** the row sat above the second card (`ride_from`, the previous card's sensor). That still works on a card without `ride_to` or `ride_to_station`.
-- **When the sensor is unavailable** (DBF down for longer than any cache in front of it covers), the card shows the station's departures from the integration instead: from DBF, else Transitous, else the last known ones, and says which. It remembers the station, and the destinations seen on its platforms, while the sensor works. Transitous rarely knows S-Bahn platforms, so those destinations then stand for the direction.
+- **When the sensor is unavailable, or DBF is down for real** (db_infoscreen then keeps showing its last board, ageing, without saying so), the card shows the station's departures from the integration instead: from DBF, else Transitous, else the last known ones, and says which. It remembers the station, and the destinations seen on its platforms, while the sensor works. Transitous rarely knows S-Bahn platforms, so those destinations then stand for the direction.
 
 ```yaml
 type: custom:spdbf-connection-card
@@ -161,7 +161,7 @@ DBF fails in two ways: your server is unreachable, or it answers with errors bec
 The dialog, the cards and the stop entities say where the data comes from: "from Transitous (DBF can't deliver)" or "last known, as of 14:05".
 
 - **Fails fast:** after one failed request, your server is skipped for a minute and then tried again. You don't wait for a timeout at every stop.
-- **Map stops:** stops already on the map stay. Only the 3 nearest ask Transitous; the others show their last known departures. New stops are only looked up in DBF: if it's down when Home Assistant starts, the map starts empty and fills once DBF answers, while the cards, the search and the status checks already work.
+- **Map stops:** stops already on the map stay. Only the 3 nearest ask Transitous; the others show their last known departures, and once those have left, ask Transitous at most every 5 minutes. New stops are only looked up in DBF: if it's down when Home Assistant starts, the map starts empty and fills once DBF answers, while the cards, the search and the status checks already work.
 - **Status checks:** every minute the integration fetches one live board per network from DBF (Berlin Hbf for DB and BVG, else the nearest map stop of that network), past any cache in front of DBF. When a network's checks have failed for the "Report DBF as down after" time (10 minutes by default):
   - `binary_sensor.spdbf_dbf_problem` turns on (device class *problem*; attributes `failing_since` and, per network, since when and why);
   - a Repairs notice appears;
