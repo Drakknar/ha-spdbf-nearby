@@ -341,7 +341,7 @@ class DbfClient:
             attempts = [(source, self._parse_hafas)]
 
         errors = []
-        failed = False
+        answered = False
         for hafas, parse in attempts:
             try:
                 departures, error = await self._fetch_board(eva, hafas, parse, rows)
@@ -351,8 +351,8 @@ class DbfClient:
             except DbfError as err:
                 _LOGGER.debug("Departures for %s (%s) failed: %s", eva, hafas, err)
                 errors.append(str(err))
-                failed = True
                 continue
+            answered = True
             if departures:
                 return Board(
                     departures=departures[:keep],
@@ -360,7 +360,8 @@ class DbfClient:
                 )
             if error:
                 errors.append(error)
-        return Board(error="; ".join(errors) or None, failed=failed)
+        # An empty board is an answer; only no backend answering is a failure.
+        return Board(error="; ".join(errors) or None, failed=not answered)
 
     async def _fetch_board(
         self, eva: str, hafas: str | None, parse: Any, rows: int

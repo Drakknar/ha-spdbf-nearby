@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
+import re
 from typing import Any
 
 import aiohttp
@@ -101,12 +102,18 @@ class TransitousClient:
         key = (network, eva)
         if key in self._stop_ids:
             return self._stop_ids[key]
-        if not name:
-            return None
-        stops = await self.async_search(name, pos)
-        stop_id = _pick_stop(stops, eva, network, name, pos)
-        self._stop_ids[key] = stop_id
-        return stop_id
+        # A card title may carry extras: "Savignyplatz (Eastbound)", "U2 → Pankow".
+        plain = re.sub(r"\([^)]*\)|→.*$", " ", name or "").strip()
+        for query in dict.fromkeys(q for q in (name, plain) if q):
+            stops = await self.async_search(query, pos)
+            if stop_id := _pick_stop(stops, eva, network, query, pos):
+                # Only sure matches are kept: the BVG number, or near the
+                # stop. A name alone may find a namesake elsewhere, and a
+                # miss may be a passing gap; both are asked again next time.
+                if pos is not None or f":{eva}" in stop_id:
+                    self._stop_ids[key] = stop_id
+                return stop_id
+        return None
 
     # --- Departures -----------------------------------------------------
 

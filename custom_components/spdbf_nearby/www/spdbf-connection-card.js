@@ -674,6 +674,8 @@
         body = `<ul>${this._rows.map((item, i) => this._row(item, i, network)).join("")}</ul>`;
       } else if (!live && !this._fallback.result) {
         body = `<div class="empty">No departures: ${esc(this._fallback.error ?? "nothing known")}</div>`;
+      } else if (!live && this._fallback.result.departures_error) {
+        body = `<div class="empty">${esc(this._fallback.result.departures_error)}</div>`;
       } else {
         body = `<div class="empty">No departures right now.</div>`;
       }

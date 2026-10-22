@@ -39,6 +39,10 @@ class LastKnown:
         """Delete the saved answers (the entry is being removed)."""
         await self._store.async_remove()
 
+    async def async_flush(self) -> None:
+        """Save now, ending a pending delayed save (the entry unloads)."""
+        await self._store.async_save(self._data)
+
     @callback
     def put(self, kind: str, key: str, value: Any) -> None:
         """Remember an answer; saved to disk after a short delay."""

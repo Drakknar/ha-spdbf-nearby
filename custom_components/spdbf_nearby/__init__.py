@@ -77,7 +77,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SpdbfConfigEntry) -> boo
         await service.async_check(coordinator.check_stations())
 
     entry.async_on_unload(async_track_time_interval(hass, check, STATUS_INTERVAL))
-    entry.async_on_unload(service.status.async_clear)
+    entry.async_on_unload(service.async_unload)
     entry.async_create_background_task(hass, check(), "spdbf_nearby status check")
 
     await hass.config_entries.async_forward_entry_setups(entry, _platforms(coordinator))

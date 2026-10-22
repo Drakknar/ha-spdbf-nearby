@@ -45,6 +45,7 @@ class DbfStatus:
         # Some network is down for real: failing for problem_after.
         self.problem = False
         self._listeners: list[CALLBACK_TYPE] = []
+        self._closed = False
 
     @property
     def failing_since(self) -> datetime | None:
@@ -69,7 +70,9 @@ class DbfStatus:
     @callback
     def record(self, checks: dict[str, str | None]) -> None:
         """Take one round of checks (network -> error, or None if it worked)."""
-        if not checks:
+        # A check still running when the entry unloaded must not bring the
+        # Repairs notice back.
+        if not checks or self._closed:
             return
         now = dt_util.utcnow()
         self.last_check = now
@@ -125,7 +128,8 @@ class DbfStatus:
 
     @callback
     def async_clear(self) -> None:
-        """Remove the Repairs notice (the entry unloads)."""
+        """Remove the Repairs notice and stop taking checks (the entry unloads)."""
+        self._closed = True
         ir.async_delete_issue(self.hass, DOMAIN, self._issue_id)
 
     def attributes(self) -> dict[str, Any]:

@@ -161,7 +161,7 @@ DBF fails in two ways: your server is unreachable, or it answers with errors bec
 The dialog, the cards and the stop entities say where the data comes from: "from Transitous (DBF can't deliver)" or "last known, as of 14:05".
 
 - **Fails fast:** after one failed request, your server is skipped for a minute and then tried again. You don't wait for a timeout at every stop.
-- **Map stops:** stops already on the map stay. Only the 3 nearest ask Transitous; the others show their last known departures. New stops are only looked up in DBF. If the server is down when Home Assistant starts, the integration retries setup by itself.
+- **Map stops:** stops already on the map stay. Only the 3 nearest ask Transitous; the others show their last known departures. New stops are only looked up in DBF: if it's down when Home Assistant starts, the map starts empty and fills once DBF answers, while the cards, the search and the status checks already work.
 - **Status checks:** every minute the integration fetches one live board per network from DBF (Berlin Hbf for DB and BVG, else the nearest map stop of that network), past any cache in front of DBF. When a network's checks have failed for the "Report DBF as down after" time (10 minutes by default):
   - `binary_sensor.spdbf_dbf_problem` turns on (device class *problem*; attributes `failing_since` and, per network, since when and why);
   - a Repairs notice appears;

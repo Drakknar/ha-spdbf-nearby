@@ -137,9 +137,13 @@
   // The integration's DBF problem sensor (attribute spdbf_status), on while
   // DBF has been down for real. Found once, then looked up by id.
   let statusId = null;
+  let statusSearched = 0;
+  const STATUS_SEARCH_MS = 30000; // without the sensor, look again at most this often
   function status() {
-    const states = hass()?.states ?? {};
-    if (!statusId || !states[statusId]) {
+    const states = hass()?.states;
+    if (!states) return null; // before Home Assistant is connected: not a search
+    if ((!statusId || !states[statusId]) && Date.now() - statusSearched > STATUS_SEARCH_MS) {
+      statusSearched = Date.now();
       statusId = Object.keys(states).find((id) => states[id].attributes?.spdbf_status === true) ?? null;
     }
     const sensor = statusId ? states[statusId] : null;

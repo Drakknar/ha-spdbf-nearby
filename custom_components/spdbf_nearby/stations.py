@@ -225,7 +225,9 @@ def combine_boards(own: Board, others: list[Board], keep: int) -> Board:
         departures=departures[:keep],
         error=None if departures else own.error,
         via=own.via,
-        failed=own.failed and not departures,
+        # The own board (BVG: U-Bahn, trams, buses) failing makes the whole
+        # board a failure, even with the linked DB lines, so it falls back.
+        failed=own.failed,
         origin=own.origin,
         as_of=own.as_of,
     )

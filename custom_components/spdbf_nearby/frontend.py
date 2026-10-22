@@ -13,6 +13,7 @@ resource is updated with each release and removed with the last entry.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from homeassistant.components.lovelace.const import LOVELACE_DATA, MODE_STORAGE
@@ -26,6 +27,8 @@ LOADER_PATH = f"{STATIC_URL}/spdbf-loader.js"
 # A URL of its own: a browser may remember a failed import of the extra
 # module's URL for the page's lifetime.
 RESOURCE_URL = f"{LOADER_PATH}?v={FRONTEND_VERSION}&via=resource"
+# Entries set up at the same time must not both add the resource.
+_LOCK_KEY = "spdbf_nearby_resource_lock"
 
 
 def _resources(hass: HomeAssistant):  # noqa: ANN202 - Home Assistant's collection
@@ -39,6 +42,11 @@ async def async_register_resource(hass: HomeAssistant) -> None:
     """Add the loader as a dashboard resource, or bring it to this version."""
     if (resources := _resources(hass)) is None:
         return
+    async with hass.data.setdefault(_LOCK_KEY, asyncio.Lock()):
+        await _async_register(resources)
+
+
+async def _async_register(resources) -> None:  # noqa: ANN001 - Home Assistant's collection
     await resources.async_get_info()  # loads the stored resources
     ours = [
         item for item in resources.async_items()
