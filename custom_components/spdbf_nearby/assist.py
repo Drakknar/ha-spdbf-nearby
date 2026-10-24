@@ -478,7 +478,7 @@ async def line_status(
     place: Place,
     *,
     stop: str | None,
-    lines: list[str],
+    lines: str | list[str] | None,
     within_minutes: int,
 ) -> dict[str, Any]:
     """Return how each line at a stop is running: next departure, delays,
@@ -488,6 +488,8 @@ async def line_status(
     now = dt_util.now()
     within = min(within_minutes, ASSIST_MAX_WINDOW)
     rows = _upcoming([_board_row(d) for d in board.departures], now, within)
+    # The tool takes one line as text too ("S41"), not only a list.
+    lines = _as_list(lines)
     wanted = [line_key(tidy_line(line)) for line in lines]
     if wanted:
         rows = [row for row in rows if line_key(row.line) in wanted]

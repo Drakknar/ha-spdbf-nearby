@@ -217,7 +217,7 @@ class LineStatusTool(_SpdbfTool):
             coordinator,
             self._place(hass, coordinator, args, llm_context, user_id),
             stop=args.get("stop"),
-            lines=args.get("lines") or [],
+            lines=args.get("lines"),
             within_minutes=args["within_minutes"],
         )
 
