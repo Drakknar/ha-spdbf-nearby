@@ -931,6 +931,16 @@ def sensor_leg(
     return rows
 
 
+def _card_int(value: Any, default: int) -> int:
+    """A whole number from a card's YAML ("3", 3.5, "3.5"); default if it
+    isn't one, as the card itself goes on with it."""
+    try:
+        number = int(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return max(0, number)
+
+
 def _commute_legs(
     hass: HomeAssistant, coordinator: SpdbfCoordinator, commute: Commute
 ) -> list[Leg] | None:
@@ -964,7 +974,7 @@ def _commute_legs(
                 )
         elif str(card.get("ride_to_station") or "").strip():
             ride_to = {"name": str(card["ride_to_station"]).strip()}
-        walk = int(card.get("walk_minutes") or 0)
+        walk = _card_int(card.get("walk_minutes"), 0)
         legs.append(
             Leg(
                 title=title,
@@ -1042,7 +1052,7 @@ async def _commute_boards(
         boards.append({
             "at": title,
             "data": _source_note(origin, as_of),
-            "departures": [row_json(r, now) for r in rows[: int(card.get("departures") or 5)]],
+            "departures": [row_json(r, now) for r in rows[: _card_int(card.get("departures"), 5) or 5]],
         })
     return boards
 

@@ -256,3 +256,38 @@ async def test_sensor_without_departures_keeps_its_network(hass) -> None:
     assert networks == {
         "bvg": "BVG", "legacy": "BVG", "iris": "DB", "efa": "DB", "unregistered": "DB"
     }
+
+
+async def test_commute_numbers_from_yaml_dont_crash() -> None:
+    """walk_minutes / departures typed as "3.5" or text are read, not raised."""
+    hass = FakeHass(
+        [
+            _sensor("sensor.a", "900023201", [_sensor_dep("S5", i) for i in range(4, 12)], "A"),
+            _sensor("sensor.b", "900100003", [_sensor_dep("U2", 20)], "B"),
+        ]
+    )
+    coordinator = FakeCoordinator({})
+    boards = assist.Commute(
+        name="Boards",
+        dashboard="overview",
+        cards=[{"type": assist.CONNECTION_CARD, "entity": "sensor.a", "departures": "3.5"}],
+        visibility=None,
+    )
+    result = await assist._commute_boards(hass, coordinator, boards, dt_util.now())
+    assert len(result[0]["departures"]) == 3
+    legs = assist._commute_legs(
+        hass,
+        coordinator,
+        assist.Commute(
+            name="Work",
+            dashboard="overview",
+            cards=[
+                {"type": assist.CONNECTION_CARD, "entity": "sensor.a", "ride_to": "sensor.b",
+                 "walk_minutes": "2.5"},
+                {"type": assist.CONNECTION_CARD, "entity": "sensor.b", "walk_minutes": "soon"},
+            ],
+            visibility=None,
+        ),
+    )
+    assert [leg.walk_before for leg in legs] == [0, 2]
+    assert legs[1].walk_after == 0
