@@ -207,7 +207,9 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
 
 ## Testing
 
-There are **no automated tests in the repository**. What has been done for changes so far:
+**In the repository (since 0.10.1):** `tests/` holds unit tests of the Assist answers (`assist.py`) on a fake coordinator; no Home Assistant instance or DBF server is needed. Run from the repository root with `pytest tests` in a venv with `pytest-homeassistant-custom-component` (0.13.373 = HA 2026.10.2); `tests/pytest.ini` sets `asyncio_mode = auto` and the import path. The integration tests below are still scratch tests.
+
+What has been done for changes so far:
 
 1. `python -m py_compile custom_components/spdbf_nearby/*.py`
 2. Check the DBF server directly:
