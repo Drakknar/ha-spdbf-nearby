@@ -112,6 +112,7 @@ TRANSITOUS_URL = "https://api.transitous.org/api"
 TRANSITOUS_RADIUS_METERS = 50  # the station's platforms, not nearby bus stops
 TRANSITOUS_MATCH_METERS = 500  # a DBF stop matches a Transitous stop this close
 TRANSITOUS_BOARD_CACHE_TTL = timedelta(seconds=60)
+TRANSITOUS_NEARBY_CACHE_TTL = timedelta(seconds=60)
 TRANSITOUS_MAX_ROWS = 100
 FALLBACK_STOPS = 3
 # The other map stops show last known boards; when those run out (map stops

@@ -291,3 +291,69 @@ async def test_commute_numbers_from_yaml_dont_crash() -> None:
     )
     assert [leg.walk_before for leg in legs] == [0, 2]
     assert legs[1].walk_after == 0
+
+
+class NearbyDownCoordinator(FakeCoordinator):
+    """DBF can't look stops up; Transitous has the nearest ones."""
+
+    def __init__(self, error: Exception, degraded: bool = True) -> None:
+        super().__init__({})
+        self.error = error
+        self.client.degraded = degraded
+        self.fallback_asked = 0
+        self.transitous_stop = Stop(
+            name="S Charlottenburg Bhf (Berlin)",
+            eva="de-DELFI_de:11000:900024101",
+            source="Transitous",
+            latitude=52.50473,
+            longitude=13.303862,
+        )
+
+    async def async_nearby(self, pos: Any) -> list[Stop]:
+        raise self.error
+
+    async def async_nearby_fallback(self, pos: Any) -> list[Stop]:
+        self.fallback_asked += 1
+        return [self.transitous_stop]
+
+    async def async_board(self, eva: str, source: str, linked: Any = None, **_: Any) -> Board:
+        assert (eva, source) == (self.transitous_stop.eva, "Transitous")
+        return Board(departures=[_dep("S5", 4)], origin="transitous")
+
+
+HERE = assist.Place((52.5054, 13.3053), "Stefano")
+
+
+async def test_near_me_falls_back_to_transitous_while_dbf_is_down() -> None:
+    from custom_components.spdbf_nearby.dbf import ServerUnreachable
+
+    coordinator = NearbyDownCoordinator(ServerUnreachable("down"))
+    deps = await assist.departures(
+        coordinator,
+        HERE,
+        stop=None,
+        filters=assist.Filters.of({}),
+        towards=None,
+        per_platform=None,
+        count=8,
+        within_minutes=60,
+    )
+    assert deps["stop"] == "S Charlottenburg Bhf (Berlin)"
+    assert "Transitous" in deps["stop_found_via"]
+    assert "Transitous" in deps["data"]
+    assert [d["line"] for d in deps["departures"]] == ["S5"]
+    near = await assist.nearby_stops(coordinator, HERE, count=5)
+    assert [s["stop"] for s in near["stops"]] == ["S Charlottenburg Bhf (Berlin)"]
+    assert "Transitous" in near["data"]
+
+
+async def test_dbf_refusal_is_not_an_outage() -> None:
+    """A DBF error while DBF is fine (e.g. an unpatched server) isn't hidden."""
+    import pytest
+
+    from custom_components.spdbf_nearby.dbf import DbfError
+
+    coordinator = NearbyDownCoordinator(DbfError("Invalid lon/lat received"), degraded=False)
+    with pytest.raises(DbfError):
+        await assist.nearby_stops(coordinator, HERE, count=5)
+    assert coordinator.fallback_asked == 0

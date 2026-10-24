@@ -34,9 +34,10 @@ from .const import (
     DOMAIN,
     HAFAS_SOURCES,
     SOURCE_DB,
+    SOURCE_TRANSITOUS,
 )
 from .coordinator import SpdbfCoordinator, position_of
-from .dbf import DbfError, distance_m
+from .dbf import DbfError, ServerUnreachable, distance_m
 from .service import ORIGIN_LAST_KNOWN, ORIGIN_TRANSITOUS
 from .stations import Board, Position, Stop, line_key, station_names, tidy_line
 
@@ -418,10 +419,29 @@ async def _resolve_stop(
         raise AssistError(
             f"The position of {place.label} isn't known; name a stop or a place instead"
         )
-    stops = await coordinator.async_nearby(place.position)
+    stops = await _nearby(coordinator, place)
     if not stops:
         raise AssistError(f"No stops found near {place.label}")
     return stops[0]
+
+
+async def _nearby(coordinator: SpdbfCoordinator, place: Place) -> list[Stop]:
+    """Return the stops near a place; while DBF can't look them up, the
+    nearest few from Transitous (Assist only: the map keeps its own)."""
+    assert place.position is not None
+    try:
+        return await coordinator.async_nearby(place.position)
+    except DbfError as err:
+        # DBF's own refusals (an unpatched server) aren't outages.
+        if not (isinstance(err, ServerUnreachable) or coordinator.client.degraded):
+            raise
+        stops = await coordinator.async_nearby_fallback(place.position)
+        if not stops:
+            raise AssistError(
+                f"DBF can't look up stops near {place.label} right now ({err}), "
+                "and Transitous found none"
+            ) from err
+        return stops
 
 
 async def _stop_board(coordinator: SpdbfCoordinator, stop: Stop) -> Board:
@@ -445,6 +465,8 @@ def _upcoming(rows: list[Row], now: datetime, within: int) -> list[Row]:
 def _stop_json(stop: Stop, place: Place) -> dict[str, Any]:
     meters = distance_m(stop, place.position)
     out: dict[str, Any] = {"stop": stop.name}
+    if stop.source == SOURCE_TRANSITOUS:
+        out["stop_found_via"] = "Transitous, because DBF can't look up stops right now"
     if meters is not None:
         out["distance_m"] = round(meters)
         out["distance_from"] = place.label
@@ -604,7 +626,7 @@ async def nearby_stops(
     """Return the stops near a place, with the lines seen there."""
     if place.position is None:
         raise AssistError(f"The position of {place.label} isn't known")
-    stops = await coordinator.async_nearby(place.position)
+    stops = await _nearby(coordinator, place)
     out = []
     for stop in stops[:count]:
         item = _stop_json(stop, place)
@@ -612,7 +634,13 @@ async def nearby_stops(
         if lines := list(dict.fromkeys(d.get("line") for d in stop.board.departures if d.get("line"))):
             item["lines_seen"] = lines
         out.append(item)
-    return {"near": place.label, "stops": out}
+    result: dict[str, Any] = {"near": place.label, "stops": out}
+    if any(stop.source == SOURCE_TRANSITOUS for stop in stops):
+        result["data"] = (
+            "Fallback data from Transitous because DBF can't look up stops right "
+            "now: only the nearest few stops."
+        )
+    return result
 
 
 # --- Connections: legs with rides and changes ------------------------------

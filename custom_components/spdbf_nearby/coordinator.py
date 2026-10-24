@@ -282,6 +282,11 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
             stops = link_networks(stops)
         return stops[: self._max_stops]
 
+    async def async_nearby_fallback(self, pos: Position) -> list[Stop]:
+        """Return the nearest stops from Transitous within the radius (Assist,
+        while DBF can't look stops up; the map and cards don't use it)."""
+        return await self.client.async_nearby_fallback(pos, self._radius_m)
+
     async def async_board(
         self,
         eva: str,

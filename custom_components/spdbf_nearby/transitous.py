@@ -28,6 +28,7 @@ from .const import (
     SOURCE_TRANSITOUS,
     TRANSITOUS_BOARD_CACHE_TTL,
     TRANSITOUS_MATCH_METERS,
+    TRANSITOUS_NEARBY_CACHE_TTL,
     TRANSITOUS_RADIUS_METERS,
     TRANSITOUS_URL,
     USER_AGENT,
@@ -50,6 +51,7 @@ class TransitousClient:
         # (network, eva) of a DBF stop -> Transitous stop id; stops don't move.
         self._stop_ids: dict[tuple[str, str], str | None] = {}
         self._boards: dict[tuple[str, int], tuple[datetime, list[dict[str, Any]]]] = {}
+        self._nearby: dict[tuple[float, float], tuple[datetime, list[Stop]]] = {}
 
     async def _get(self, path: str, params: dict[str, Any]) -> Any:
         try:
@@ -73,20 +75,23 @@ class TransitousClient:
         params: dict[str, Any] = {"text": query, "type": "STOP"}
         if pos is not None:
             params["place"] = f"{pos[0]},{pos[1]}"
-        matches = await self._get("v1/geocode", params)
-        if not isinstance(matches, list):
-            raise TransitousError("Unexpected answer from Transitous")
-        return [
-            Stop(
-                name=match["name"],
-                eva=match["id"],
-                source=SOURCE_TRANSITOUS,
-                latitude=float(match["lat"]),
-                longitude=float(match["lon"]),
-            )
-            for match in matches
-            if match.get("id") and match.get("lat") is not None and match.get("lon") is not None
-        ]
+        return _stops(await self._get("v1/geocode", params))
+
+    async def async_nearby(self, pos: Position) -> list[Stop]:
+        """Return the stops closest to a position (Transitous's default 5),
+        briefly cached per ~100 m."""
+        now = dt_util.utcnow()
+        key = (round(pos[0], 3), round(pos[1], 3))
+        if (cached := self._nearby.get(key)) and now - cached[0] < TRANSITOUS_NEARBY_CACHE_TTL:
+            return cached[1]
+        stops = _stops(
+            await self._get("v1/reverse-geocode", {"place": f"{pos[0]},{pos[1]}", "type": "STOP"})
+        )
+        self._nearby = {
+            k: v for k, v in self._nearby.items() if now - v[0] < TRANSITOUS_NEARBY_CACHE_TTL
+        }
+        self._nearby[key] = (now, stops)
+        return stops
 
     async def async_stop_id(
         self, eva: str, network: str, name: str | None, pos: Position | None
@@ -178,6 +183,27 @@ class TransitousClient:
             "times": True,
             "messages": messages,
         }
+
+
+def _stops(matches: Any) -> list[Stop]:
+    """Return geocoding matches (v1/geocode, v1/reverse-geocode) as stops."""
+    if not isinstance(matches, list):
+        raise TransitousError("Unexpected answer from Transitous")
+    return [
+        Stop(
+            name=match["name"],
+            eva=match["id"],
+            source=SOURCE_TRANSITOUS,
+            latitude=float(match["lat"]),
+            longitude=float(match["lon"]),
+        )
+        for match in matches
+        if isinstance(match, dict)
+        and match.get("id")
+        and match.get("name")
+        and match.get("lat") is not None
+        and match.get("lon") is not None
+    ]
 
 
 def _pick_stop(
