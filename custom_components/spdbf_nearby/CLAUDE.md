@@ -17,7 +17,7 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
 
 ```
 <repo root>/
-  hacs.json, README.md              HACS metadata (min HA 2026.9.0) and user docs
+  hacs.json, README.md              HACS metadata (min HA 2026.10.0) and user docs
   custom_components/spdbf_nearby/   <- this folder
     __init__.py         Serves www/ as static files, injects spdbf-loader.js on every page
                         (add_extra_js_url), registers the WebSocket commands, creates the
@@ -41,6 +41,10 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
     coordinator.py      The map feature: follows the tracked entity, keeps nearby stops and their
                         departures; with map stops off it only answers "nearby"
     websocket_api.py    spdbf_nearby/search, /nearby, /board and /trip for the cards and the dialog
+    llm.py              Assist tools (HA 2026.10 llm platform): departures, line_status,
+                        nearby_stops, connection, commutes; read-only, prompt fragment
+    assist.py           What the tools answer: where "near me" is, stop lookup, filters,
+                        towards (trip lookups), line status, connection plans, dashboard commutes
     geo_location.py     One SpdbfStop entity per stop; added and removed as the stop list changes
     config_flow.py      Setup and options flow
     const.py            Settings, defaults, FRONTEND_VERSION (= manifest version), thresholds
@@ -114,6 +118,13 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
   - **`search`** also returns `origin` and `as_of`; **`trip`** accepts `{transitous: id}` and returns `origin` (and `as_of` when last known).
   - **Errors:** `server_unreachable`, `dbf_error`, `not_ready`, `not_found`, `invalid_network`.
   - **Which entry:** each command takes an optional `entry_id`. By default it uses the entry whose tracked person belongs to the logged-in user, else the first loaded entry.
+- **Assist tools (since 0.10.0, `llm.py` + `assist.py`; owner's request 2026-10-24):** Home Assistant 2026.10 asks each loaded integration's `llm` platform (`async_get_tools(hass, llm_context, api_id)` → `LLMTools(tools, prompt)`) for tools of the Assist API, so they reach every LLM conversation agent and HA's MCP server (the owner's LiteLLM proxies it; the read-only `home_assistant` entry there lists them in `allowed_tools`). No scripts or exposed entities needed. Tool names must start with `spdbf_nearby__` (HA warns otherwise, breaking in 2027.3); `integration = DOMAIN`; annotations read-only.
+  - **Tools:** `departures` (stop or nearest; `lines`, `destination`, `platforms`, `towards`, `per_platform`, `count`, `within_minutes`), `line_status` (per line: next, cancelled, delays, HAFAS trip notices, `not_running_in_window`), `nearby_stops`, `connection` (legs `{stop, lines, platforms, destination, towards, walk_minutes}` + `to`, `walk_after_minutes`), `commutes` (`commute` name part). Parameters are probatio schemas with descriptions; list-or-text parameters are `Any(str, [str])` so they serialize (`probatio.to_openapi`, as Ollama's `_format_tool` does). Owner's examples (2026-10-24): "near S Pichelsberg, buses to Zoologischer Garten or the S3", "Savignyplatz, first 2 departures from both platforms". Owner chose all suggested extras except departures at a later time (DBF boards only hold the next ~80 rows).
+  - **"Near me" (`assist.locate`):** `near` (person/zone/tracker by entity id or name) → the asking device: its own `device_tracker` with a fix (a phone), no tracker at all = at home (`zone.home`, a voice satellite), a tracker without a fix falls through → the asking user's person (`context.user_id`) → the entry's tracked entity. The entry is the one tracking the asking user's person, else the first loaded.
+  - **Rows:** boards and db_infoscreen sensor rows become one `Row` shape; filters copy the connection card's (`platform "2"` matches `"2 (U2)"`, destination substrings, `hide_destinations`). `mode` is guessed from the line name (S-Bahn, U-Bahn, regional, long-distance, else "bus or tram"; DBF has no product type). Every answer has `data`: "Live.", the Transitous note, or "last known as of HH:MM".
+  - **`towards`:** BVG rows have no route, so one trip per (line, destination), at most `ASSIST_MAX_TRIPS` (8); a destination that is the station passes without one; unchecked rows are counted in `not_checked`.
+  - **Connections and commutes (`plan`):** for the first leg's next catchable departures (after `walk_before`), `TransportService.async_ride` on that row's line to the next leg's stop, arrival = expected departure + ride, then the next leg's first departure after arrival + walk (`change_minutes`); the last leg rides to `to` / `ride_to_station`, then `walk_after` → `done_at`.
+  - **Commutes from dashboards:** every storage dashboard (`hass.data[LOVELACE_DATA].dashboards[*].async_load(False)`), each section (or a masonry view) with `custom:spdbf-connection-card`s, named by its heading card. Legs follow `ride_to` from the first card; card `walk_minutes` = walk after its ride, i.e. the next leg's `walk_before`. Sections without rides are answered as boards. Without a name, the sections whose visibility conditions hold now (state, location for the asking person, and/or/not, screen; others unknown → not chosen). Sensor rows are used while DBF delivers; while degraded, the sensor's station board (db_infoscreen keeps recalculating its last board, see 0.9.1).
 - **Entities:** `geo_location` entities, state = distance in km.
   - **No unique_id on purpose,** so stops passed while travelling never pile up in the entity registry. They also don't appear in `core.restore_state`.
   - **Recorder (since 0.2.3):** `_unrecorded_attributes` keeps `departures`, `next_departure`, `departures_via`, `departures_error`, `distance_km`, `url`, (since 0.3.0) `merged_stops` and `fallback`, and (since 0.4.0) `networks` out of history. Before that, every refresh wrote a new attributes row per stop.
@@ -221,6 +232,8 @@ There are **no automated tests in the repository**. What has been done for chang
     - **Shadowing:** insert the scratch `custom_components` folder first in `custom_components.__path__`, because the harness's `testing_config` shadows it.
   - **`pip install home-assistant-frontend==<pinned>`**, because the `frontend` dependency needs it.
   - **Teardown errors:** the hass fixture's teardown raises `WinError 10022` in tests that use the HTTP/WebSocket client. That's an environment issue; the tests themselves pass.
+
+**0.10.0 scratch pytest (2026-10-24, same harness and Windows workarounds; `pip install hassil home-assistant-intents gazetteer-matcher` because `async_call_tool` imports conversation):** 7 tests through the real Assist API (`llm.async_get_api` + `async_call_tool`) on a fake DBF (Savignyplatz BVG + DB, Alexanderplatz, HAFAS trips with times) and a stored dashboard: tools listed and serializable, per-platform grouping, destination/line filters, nearest stop, `towards` with a short-turning U2, line status (cancelled, delay, notice, missing S41), locations (satellite → home, phone tracker, unknown place), a two-leg connection (ride 12, change 6; the next option skips the short-turner), commutes (visibility picks "Work via …", ride + walk to done_at; a board-only section; unknown name lists the known ones). The 0.9.0 tests still pass (their resource test hard-codes v=0.9.0).
 
 **0.9.0 review (2026-10-22):** an independent review agent found 10 issues, all confirmed and fixed: setup failing while DBF is down (now loads), a failing BVG backend hidden by the merged DB lines (`failed` now follows the own board), Transitous matches cached when unsure or missing (only sure matches are kept; titles retried without "(...)" / "→ ..."; map stops use their own name and position), stop lookups bypassing the 3-stop limit while degraded (no merging lookups then), an empty IRIS board with a failing ÖBB retry counted as failure (now only "no backend answered"), the last known store not flushed on unload, the card hiding the board's error, `status()` rescanning all states on every update (at most every 30 s, and never before `hass` exists: the first version of that fix hid the warning for 30 s after page load, caught by the card test), a late check after unload recreating the Repairs notice, and concurrent resource registration (lock in `hass.data`).
 

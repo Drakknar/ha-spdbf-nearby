@@ -79,6 +79,11 @@ SEARCH_MAX_RESULTS = 20
 # result is kept (scheduled ride times hardly change).
 RIDE_MAX_TRIPS = 6
 RIDE_CACHE_TTL = timedelta(minutes=10)
+# Assist (llm.py, assist.py): answers short enough for a local model.
+ASSIST_MAX_ROWS = 30  # departures in one answer
+ASSIST_MAX_WINDOW = 180  # minutes ahead; a board holds BOARD_DEPARTURES rows anyway
+ASSIST_MAX_TRIPS = 8  # trip lookups per answer (towards, notices)
+ASSIST_MAX_OPTIONS = 3  # ways through a connection
 
 REQUEST_TIMEOUT = 20  # seconds
 CONNECT_TIMEOUT = 5  # seconds; a server that is off fails fast
