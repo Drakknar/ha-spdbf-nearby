@@ -18,6 +18,10 @@ Live public transport in Home Assistant, from your own [DBF](https://github.com/
 - **Tap a stop for its departures.** The dialog loads the stop's full board, grouped by line and destination ("U2 → Pankow: 2 · 7 · 12 min"), or sorted by time if you prefer. You get platforms, delays and cancellations, plus a link to the DBF board. This works on the Map panel, on any map card, from entity search, the stop search card and the connection cards. It follows your theme, including light/dark mode.
 - **Follow a trip.** Tap a departure to see its stops and times, with delays and disruption notices, from DBF.
 
+**Ask Assist**
+
+- **"When's the next S3 here?"** Assist's conversation agents (and Home Assistant's MCP server) get tools for departures near you or at any stop, line status, nearby stops, connections with changes, and your dashboard commutes. See [Assist](#assist).
+
 **Stations**
 
 - **One marker per station.** BVG lists some stations several times (Alexanderplatz has a stop for each exit and bus bay, all with the same board). Stops with identical departures are merged into one.
@@ -27,7 +31,7 @@ Live public transport in Home Assistant, from your own [DBF](https://github.com/
 
 ## Requirements
 
-- Home Assistant 2026.9.0 or newer.
+- Home Assistant 2026.10.0 or newer.
 - A DBF server that Home Assistant can reach.
 - **For BVG and other HAFAS stops on the map, and for the stop search:** the patched image [`ghcr.io/drakknar/db-fakedisplay`](https://github.com/Drakknar/db-fakedisplay-patched). Upstream DBF doesn't send coordinates for HAFAS stops and can't search stops by name as JSON. With an unpatched server, only DB stops appear on the map, Home Assistant shows a Repairs notice explaining why, and the search card says it needs the patched image.
 - **For your location:** a person or device tracker with GPS, such as the Home Assistant companion app.
@@ -140,6 +144,24 @@ walk_minutes: 4         # optional: walk after the ride
 show_ride: true         # optional
 show_walk: true         # optional
 ```
+
+## Assist
+
+With an LLM conversation agent that can control Home Assistant (the Assist API, for example Ollama, OpenAI or Google), the integration adds five tools. They only read, and they're there whenever the integration is set up; no entities need to be exposed. Home Assistant's MCP server offers them too.
+
+| Tool | Answers | Example |
+|---|---|---|
+| `spdbf_nearby__departures` | The next departures of a stop: line, destination, platform, minutes, delay, cancelled. Filters: lines, destination, platforms, `towards` (calls at a station later, not only at the end), `per_platform`. | "I'm near S Pichelsberg, when do buses to Zoologischer Garten or the S3 come?" · "First 2 departures from both platforms at Savignyplatz" · "Next U2 towards Pankow at Alexanderplatz" |
+| `spdbf_nearby__line_status` | Per line: next departure, cancellations, delays, disruption notices (BVG trips), and asked lines with no departures. | "Is the S41 running?" · "Any cancellations at Westkreuz?" |
+| `spdbf_nearby__nearby_stops` | Stops nearby with distance and the lines seen there. | "What's near me?" |
+| `spdbf_nearby__connection` | A journey described in legs (no route search): departure, ride time, arrival at the change and the departure caught there. | "If I take the next S-Bahn from Savignyplatz, which U2 towards Pankow do I get at Alexanderplatz?" |
+| `spdbf_nearby__commutes` | Your commutes as set up on your dashboards: each section of connection cards, under its heading, linked by "Ride to". Without a name, the sections the dashboard shows right now (their visibility conditions, for your person). | "When's my next train to work?" · "When do I get home?" |
+
+- **Where "near me" is:** a stop named in the question wins. Otherwise a phone asking uses its own location; any other device asking, such as a voice satellite, means home; otherwise the asking user's person, and last the integration's tracked person. A question can also name a person or zone ("near Work").
+- **Commutes** follow the cards: their filters (platforms, lines, destinations), `ride_to` / `ride_to_station` and `walk_minutes`. Sections whose cards aren't linked by rides (such as a few separate boards) are answered as boards. Departures come from the cards' db_infoscreen sensors, and from DBF's boards (with the fallbacks) while DBF can't deliver.
+- **Not live?** Every answer says where it comes from ("Live.", Transitous, or last known as of a time), and the tools tell the agent to say so.
+- **No time travel:** the tools answer from the current boards (up to 80 departures, at most 3 hours ahead); "after 18:00" isn't supported.
+- **Line types:** DBF sends no product type, so tools guess from the line name: S-Bahn, U-Bahn, regional, long-distance, or "bus or tram".
 
 ## Trips
 
