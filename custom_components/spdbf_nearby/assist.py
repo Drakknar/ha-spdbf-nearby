@@ -632,6 +632,9 @@ class Leg:
     # Where it ends: the next leg's stop, or a station by name (last leg).
     ride_to: dict[str, Any] | None = None
     walk_after: int = 0
+    # The lines the ride is timed on; None: the departure's own line. A
+    # commute leg uses its card's, so both ask (and keep) the same ride.
+    ride_lines: list[str] | None = None
 
 
 async def _leg_rows(coordinator: SpdbfCoordinator, leg: Leg, now: datetime) -> tuple[list[Row], str]:
@@ -688,7 +691,7 @@ async def _follow(
         ride = await coordinator.client.async_ride(
             {k: leg.stop[k] for k in ("eva", "name", "network") if leg.stop.get(k)},
             {k: leg.ride_to[k] for k in ("eva", "name") if leg.ride_to.get(k)},
-            [row.line],
+            [row.line] if leg.ride_lines is None else leg.ride_lines,
         )
         if ride is None:
             step["ride"] = "unknown"
@@ -696,7 +699,7 @@ async def _follow(
             break
         arrival = row.expected + timedelta(minutes=ride["minutes"])
         step["ride_minutes"] = ride["minutes"]
-        step["arrives"] = f"{_clock(arrival)} at {leg.ride_to.get('name')}"
+        step["arrives"] = f"{_clock(arrival)} at {leg.ride_to.get('title') or leg.ride_to.get('name')}"
         if i + 1 == len(legs):
             option["arrival"] = _clock(arrival)
             if leg.walk_after:
@@ -872,6 +875,16 @@ def _sensor_stop(state: State | None, title: str) -> dict[str, Any] | None:
     return {"eva": station, "name": name, "network": network}
 
 
+def _card_ride_lines(state: State | None, card: dict[str, Any], stop: dict[str, Any]) -> list[str]:
+    """The lines a connection card times its ride on: those of the sensor's
+    rows it shows, all the sensor's if it shows none (sorted, as the card
+    sends them; empty means any line)."""
+    raw = state.attributes.get("next_departures") if state else None
+    rows = [_sensor_row(d, stop) for d in raw if isinstance(d, dict)] if isinstance(raw, list) else []
+    shown = [row for row in rows if Filters.of(card)(row)] or rows
+    return sorted({row.line for row in shown if row.line})
+
+
 def sensor_leg(
     hass: HomeAssistant, coordinator: SpdbfCoordinator, entity: str, stop: dict[str, Any]
 ) -> Callable[[], Awaitable[tuple[list[Row], str, Any]]]:
@@ -906,16 +919,23 @@ def _commute_legs(
         seen.add(card["entity"])
         state = hass.states.get(card["entity"])
         title = card.get("title") or (state.name if state else card["entity"])
-        stop = _sensor_stop(state, title)
+        # Named as the card names it (its title, else the stop id), so the
+        # ride keys match the card's.
+        stop = _sensor_stop(state, card.get("title") or "")
         if stop is None:
             raise AssistError(f"The sensor of '{title}' ({card['entity']}) has no station right now")
         nxt = by_entity.get(card.get("ride_to") or "")
         ride_to = None
         if card.get("ride_to"):
             nxt_state = hass.states.get(card["ride_to"])
-            ride_to = _sensor_stop(nxt_state, (nxt or {}).get("title", ""))
-        elif card.get("ride_to_station"):
-            ride_to = {"name": card["ride_to_station"]}
+            ride_to = _sensor_stop(nxt_state, "")
+            if ride_to is not None:
+                # Shown in the answer; the ride itself goes by eva and name.
+                ride_to["title"] = (nxt or {}).get("title") or (
+                    nxt_state.name if nxt_state else ride_to["name"]
+                )
+        elif str(card.get("ride_to_station") or "").strip():
+            ride_to = {"name": str(card["ride_to_station"]).strip()}
         walk = int(card.get("walk_minutes") or 0)
         legs.append(
             Leg(
@@ -926,6 +946,7 @@ def _commute_legs(
                 walk_before=walk_before,
                 ride_to=ride_to,
                 walk_after=walk if nxt is None else 0,
+                ride_lines=_card_ride_lines(state, card, stop),
             )
         )
         walk_before = walk

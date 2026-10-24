@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
+from homeassistant.core import State
 from homeassistant.util import dt as dt_util
 
 from custom_components.spdbf_nearby import assist
@@ -165,3 +166,67 @@ async def test_line_status_notices_are_short_and_not_repeated() -> None:
     assert len(s41["notices"][1]) <= assist.ASSIST_MAX_NOTICE
     assert "notices" not in s42
     assert s42["same_notices_as"] == ["S41"]
+
+
+class FakeStates:
+    def __init__(self, states: list[State]) -> None:
+        self._states = {state.entity_id: state for state in states}
+
+    def get(self, entity_id: str) -> State | None:
+        return self._states.get(entity_id)
+
+
+class FakeHass:
+    def __init__(self, states: list[State]) -> None:
+        self.states = FakeStates(states)
+
+
+def _sensor_dep(line: str, minutes: int) -> dict[str, Any]:
+    when = dt_util.now() + timedelta(minutes=minutes, seconds=30)
+    return {
+        "train": line,
+        "destination": "X",
+        "platform": "1",
+        "scheduledTime": when.strftime("%Y-%m-%d %H:%M:%S"),
+        "departure_timestamp": int(when.timestamp()),
+        "delay": 0,
+    }
+
+
+def _sensor(entity_id: str, station: str, deps: list[dict[str, Any]], name: str) -> State:
+    return State(
+        entity_id,
+        str(len(deps)),
+        {"station": station, "next_departures": deps, "friendly_name": name},
+    )
+
+
+async def test_commute_ride_is_asked_like_the_card() -> None:
+    """The commute asks the ride with the card's start, end and lines, so a
+    ride the card got is found in last known while DBF is degraded."""
+    hass = FakeHass(
+        [
+            _sensor("sensor.a", "900023201", [_sensor_dep("S5", 4), _sensor_dep("S7", 6)], "A sensor"),
+            _sensor("sensor.b", "900100003", [_sensor_dep("U2", 20)], "B sensor"),
+        ]
+    )
+    coordinator = FakeCoordinator({})
+    commute = assist.Commute(
+        name="Work",
+        dashboard="overview",
+        cards=[
+            {"type": assist.CONNECTION_CARD, "entity": "sensor.a", "ride_to": "sensor.b"},
+            {"type": assist.CONNECTION_CARD, "entity": "sensor.b", "title": "Alex"},
+        ],
+        visibility=None,
+    )
+    legs = assist._commute_legs(hass, coordinator, commute)
+    result = await assist.plan(coordinator, legs, options=1)
+    # What spdbf-connection-card's _updateRide sends for the first card:
+    # its _stop() (no title: the stop id), the next card's _stop(next, ""),
+    # and the lines of the rows it shows.
+    start = {"eva": "900023201", "name": "900023201", "network": "BVG"}
+    end = {"eva": "900100003", "name": "900100003"}
+    assert coordinator.client.rides[0] == (start, end, ["S5", "S7"])
+    # The answer still names the next stop by its card.
+    assert result["options"][0]["legs"][0]["arrives"].endswith(" at Alex")
