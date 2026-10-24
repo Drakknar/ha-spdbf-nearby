@@ -32,6 +32,7 @@ from .const import (
     ASSIST_MAX_TRIPS,
     ASSIST_MAX_WINDOW,
     DOMAIN,
+    HAFAS_SOURCES,
     SOURCE_DB,
 )
 from .coordinator import SpdbfCoordinator, position_of
@@ -861,7 +862,29 @@ def relevant_now(
     return all(results)
 
 
-def _sensor_stop(state: State | None, title: str) -> dict[str, Any] | None:
+def _configured_network(hass: HomeAssistant, entity_id: str) -> str | None:
+    """The network a db_infoscreen sensor is set up for (its data source),
+    if it is one DBF serves here: DB (IRIS) or a HAFAS service."""
+    entity = er.async_get(hass).async_get(entity_id)
+    entry = (
+        hass.config_entries.async_get_entry(entity.config_entry_id)
+        if entity is not None and entity.config_entry_id
+        else None
+    )
+    if entry is None or entry.domain != "db_infoscreen":
+        return None
+    source = str({**entry.data, **entry.options}.get("data_source") or "IRIS-TTS")
+    if source == "IRIS-TTS":
+        return SOURCE_DB
+    # "BVG – Berliner Verkehrsbetriebe", or older entries' "hafas=BVG".
+    # EFA sources aren't DBF HAFAS services; "AVV" is both (Aachen: HAFAS).
+    if source.startswith("efa=") or (source.startswith("AVV ") and "Aachen" not in source):
+        return None
+    code = source.split(" – ", 1)[0] if " – " in source else source.rsplit("=", 1)[-1]
+    return next((s for s in HAFAS_SOURCES if s.casefold() == code.strip().casefold()), None)
+
+
+def _sensor_stop(hass: HomeAssistant, state: State | None, title: str) -> dict[str, Any] | None:
     """The station of a db_infoscreen sensor, as the connection card finds it."""
     if state is None:
         return None
@@ -869,8 +892,13 @@ def _sensor_stop(state: State | None, title: str) -> dict[str, Any] | None:
     if not station:
         return None
     first = (state.attributes.get("next_departures") or [None])[0]
-    # HAFAS stop ids are numbers (BVG: 900...); IRIS stations are names.
-    network = "BVG" if isinstance(first, dict) and "scheduledDeparture" not in first else SOURCE_DB
+    if isinstance(first, dict):
+        # HAFAS rows have scheduledTime, IRIS rows scheduledDeparture.
+        network = "BVG" if "scheduledDeparture" not in first else SOURCE_DB
+    else:
+        # No departures (at night): the rows can't tell, the sensor's
+        # setup can. A BVG stop isn't a DB station for the night.
+        network = _configured_network(hass, state.entity_id) or SOURCE_DB
     name = (title or station) if station.isdigit() else station
     return {"eva": station, "name": name, "network": network}
 
@@ -921,14 +949,14 @@ def _commute_legs(
         title = card.get("title") or (state.name if state else card["entity"])
         # Named as the card names it (its title, else the stop id), so the
         # ride keys match the card's.
-        stop = _sensor_stop(state, card.get("title") or "")
+        stop = _sensor_stop(hass, state, card.get("title") or "")
         if stop is None:
             raise AssistError(f"The sensor of '{title}' ({card['entity']}) has no station right now")
         nxt = by_entity.get(card.get("ride_to") or "")
         ride_to = None
         if card.get("ride_to"):
             nxt_state = hass.states.get(card["ride_to"])
-            ride_to = _sensor_stop(nxt_state, "")
+            ride_to = _sensor_stop(hass, nxt_state, "")
             if ride_to is not None:
                 # Shown in the answer; the ride itself goes by eva and name.
                 ride_to["title"] = (nxt or {}).get("title") or (
@@ -1005,7 +1033,7 @@ async def _commute_boards(
     for card in commute.cards:
         state = hass.states.get(card["entity"])
         title = card.get("title") or (state.name if state else card["entity"])
-        stop = _sensor_stop(state, title)
+        stop = _sensor_stop(hass, state, title)
         if stop is None:
             boards.append({"at": title, "error": "its sensor has no station right now"})
             continue

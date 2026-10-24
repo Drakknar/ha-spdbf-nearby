@@ -230,3 +230,29 @@ async def test_commute_ride_is_asked_like_the_card() -> None:
     assert coordinator.client.rides[0] == (start, end, ["S5", "S7"])
     # The answer still names the next stop by its card.
     assert result["options"][0]["legs"][0]["arrives"].endswith(" at Alex")
+
+
+async def test_sensor_without_departures_keeps_its_network(hass) -> None:
+    """A BVG db_infoscreen sensor with no departures (at night) stays BVG."""
+    from homeassistant.helpers import entity_registry as er
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    registry = er.async_get(hass)
+    for name, source in (
+        ("bvg", "BVG – Berliner Verkehrsbetriebe"),
+        ("legacy", "hafas=BVG"),
+        ("iris", "IRIS-TTS"),
+        ("efa", "MVV – Münchener Verkehrs- und Tarifverbund"),
+    ):
+        entry = MockConfigEntry(domain="db_infoscreen", data={"data_source": source})
+        entry.add_to_hass(hass)
+        registry.async_get_or_create(
+            "sensor", "db_infoscreen", name, config_entry=entry, suggested_object_id=name
+        )
+    networks = {}
+    for name in ("bvg", "legacy", "iris", "efa", "unregistered"):
+        state = State(f"sensor.{name}", "0", {"station": "900023201", "next_departures": []})
+        networks[name] = assist._sensor_stop(hass, state, "")["network"]
+    assert networks == {
+        "bvg": "BVG", "legacy": "BVG", "iris": "DB", "efa": "DB", "unregistered": "DB"
+    }
