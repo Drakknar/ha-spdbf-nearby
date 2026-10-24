@@ -26,6 +26,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    ASSIST_MAX_NOTICE,
     ASSIST_MAX_OPTIONS,
     ASSIST_MAX_ROWS,
     ASSIST_MAX_TRIPS,
@@ -524,6 +525,8 @@ async def line_status(
         by_line.setdefault(row.line, []).append(row)
     summary = []
     trips = 0
+    # Notice text -> the first line it was listed for.
+    notices: dict[str, str] = {}
     for line, on_line in by_line.items():
         running = [row for row in on_line if not row.cancelled]
         delays = [row.delay for row in running if row.delay > 0]
@@ -548,8 +551,7 @@ async def line_status(
             except DbfError:
                 pass
             else:
-                if trip.get("messages"):
-                    item["notices"] = trip["messages"][:3]
+                _add_notices(item, line, trip.get("messages") or [], notices)
         summary.append(item)
     origin = _board_origin(board)
     result = _stop_json(found, place)
@@ -563,6 +565,36 @@ async def line_status(
     if board.error and not board.departures:
         result["error"] = board.error
     return result
+
+
+def _short_notice(text: Any) -> str:
+    text = " ".join(str(text or "").split())
+    if len(text) <= ASSIST_MAX_NOTICE:
+        return text
+    return text[: ASSIST_MAX_NOTICE - 1].rstrip() + "…"
+
+
+def _add_notices(
+    item: dict[str, Any], line: str, messages: list[Any], seen: dict[str, str]
+) -> None:
+    """Add a line's first 3 notices, shortened; a notice already listed for
+    another line (a station-wide one, often on every trip) only names it."""
+    fresh: list[str] = []
+    same_as: list[str] = []
+    for message in messages[:3]:
+        text = _short_notice(message)
+        if not text:
+            continue
+        if text in seen:
+            if seen[text] != line and seen[text] not in same_as:
+                same_as.append(seen[text])
+        elif text not in fresh:
+            seen[text] = line
+            fresh.append(text)
+    if fresh:
+        item["notices"] = fresh
+    if same_as:
+        item["same_notices_as"] = same_as
 
 
 async def nearby_stops(

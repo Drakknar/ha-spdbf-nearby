@@ -11,9 +11,15 @@ from custom_components.spdbf_nearby import assist
 from custom_components.spdbf_nearby.stations import Board, Stop
 
 
-def _dep(line: str, minutes: int, platform: str = "", destination: str = "X") -> dict[str, Any]:
+def _dep(
+    line: str,
+    minutes: int,
+    platform: str = "",
+    destination: str = "X",
+    trip: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     when = dt_util.now() + timedelta(minutes=minutes, seconds=30)
-    return {
+    dep = {
         "line": line,
         "destination": destination,
         "platform": platform,
@@ -23,6 +29,9 @@ def _dep(line: str, minutes: int, platform: str = "", destination: str = "X") ->
         "cancelled": False,
         "expected": when.isoformat(),
     }
+    if trip:
+        dep["trip"] = trip
+    return dep
 
 
 class FakeService:
@@ -31,15 +40,18 @@ class FakeService:
     def __init__(self, stops: dict[str, Stop], ride_minutes: int = 10) -> None:
         self.stops = stops
         self.ride_minutes = ride_minutes
+        self.trip_messages: dict[str, list[str]] = {}
+        self.rides: list[tuple[Any, Any, Any]] = []
 
     async def async_search(self, query: str, pos: Any) -> tuple[list[Stop], str, None]:
         return [self.stops[query]], "dbf", None
 
     async def async_ride(self, start: Any, end: Any, lines: Any) -> dict[str, Any]:
+        self.rides.append((start, end, lines))
         return {"minutes": self.ride_minutes}
 
     async def async_trip(self, trip: Any) -> dict[str, Any]:
-        return {"stops": [], "messages": []}
+        return {"stops": [], "messages": self.trip_messages.get(trip.get("id"), [])}
 
 
 class FakeCoordinator:
@@ -131,3 +143,25 @@ async def test_no_data_is_not_reported_as_no_service() -> None:
     assert deps["data"] != "Live."
     assert "note" not in deps
     assert deps["error"]
+
+
+async def test_line_status_notices_are_short_and_not_repeated() -> None:
+    """A station-wide notice on every line's trip is listed once; long ones are cut."""
+    coordinator = FakeCoordinator(
+        {
+            "Westkreuz": [
+                _dep("S41", 3, trip={"id": "a", "hafas": "BVG"}),
+                _dep("S42", 5, trip={"id": "b", "hafas": "BVG"}),
+            ]
+        }
+    )
+    lift = "Lift at Westkreuz out of service"
+    coordinator.client.trip_messages = {"a": [lift, "x" * 2000], "b": [lift]}
+    result = await assist.line_status(
+        coordinator, PLACE, stop="Westkreuz", lines=None, within_minutes=60
+    )
+    s41, s42 = result["lines"]
+    assert s41["notices"][0] == lift
+    assert len(s41["notices"][1]) <= assist.ASSIST_MAX_NOTICE
+    assert "notices" not in s42
+    assert s42["same_notices_as"] == ["S41"]

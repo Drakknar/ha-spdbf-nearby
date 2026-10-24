@@ -84,6 +84,7 @@ ASSIST_MAX_ROWS = 30  # departures in one answer
 ASSIST_MAX_WINDOW = 180  # minutes ahead; a board holds BOARD_DEPARTURES rows anyway
 ASSIST_MAX_TRIPS = 8  # trip lookups per answer (towards, notices)
 ASSIST_MAX_OPTIONS = 3  # ways through a connection
+ASSIST_MAX_NOTICE = 300  # characters of one disruption notice
 
 REQUEST_TIMEOUT = 20  # seconds
 CONNECT_TIMEOUT = 5  # seconds; a server that is off fails fast
