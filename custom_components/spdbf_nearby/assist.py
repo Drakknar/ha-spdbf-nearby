@@ -461,10 +461,18 @@ async def departures(
             )
     if per_platform:
         platforms: dict[str, list[dict[str, Any]]] = {}
+        listed = 0
         for row in rows:
-            group = platforms.setdefault(row.platform or "no platform", [])
-            if len(group) < per_platform:
-                group.append(row_json(row, now))
+            platform = row.platform or "no platform"
+            if len(platforms.get(platform, [])) >= per_platform:
+                continue
+            # A big station has many platforms: the answer stays as short as
+            # a flat list's longest.
+            if listed >= ASSIST_MAX_ROWS:
+                result["truncated"] = f"Only the first {ASSIST_MAX_ROWS} departures are listed."
+                break
+            platforms.setdefault(platform, []).append(row_json(row, now))
+            listed += 1
         result["platforms"] = dict(sorted(platforms.items()))
     else:
         result["departures"] = [row_json(row, now) for row in rows[: min(count, ASSIST_MAX_ROWS)]]

@@ -86,3 +86,22 @@ async def test_connection_keeps_a_zero_minute_change() -> None:
     result = await assist.connection(coordinator, PLACE, legs, None, 0, 1)
     steps = result["options"][0]["legs"]
     assert steps[1]["in_minutes"] == 13
+
+
+async def test_per_platform_answer_is_bounded() -> None:
+    """Grouped by platform, the answer still holds at most ASSIST_MAX_ROWS rows."""
+    deps = [_dep("S1", i % 60, platform=str(i % 20)) for i in range(80)]
+    coordinator = FakeCoordinator({"Hbf": deps})
+    result = await assist.departures(
+        coordinator,
+        PLACE,
+        stop="Hbf",
+        filters=assist.Filters.of({}),
+        towards=None,
+        per_platform=10,
+        count=8,
+        within_minutes=180,
+    )
+    total = sum(len(rows) for rows in result["platforms"].values())
+    assert total <= assist.ASSIST_MAX_ROWS
+    assert "truncated" in result
