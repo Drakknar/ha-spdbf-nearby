@@ -549,12 +549,14 @@ def _ride_on(
     )
     if last is None:
         return None
-    leave = _minute_of_day(stops[first].get("departure") or stops[first].get("arrival"))
-    arrive = _minute_of_day(stops[last].get("arrival") or stops[last].get("departure"))
+    leave_at = stops[first].get("departure") or stops[first].get("arrival")
+    arrive_at = stops[last].get("arrival") or stops[last].get("departure")
+    leave = _minute_of_day(leave_at)
+    arrive = _minute_of_day(arrive_at)
     if leave is None or arrive is None:
         return None
     return {
-        "minutes": (arrive - leave) % (24 * 60),
+        "minutes": _ride_minutes(leave_at, arrive_at, leave, arrive),
         "line": data["line"],
         "departure": f"{leave // 60:02d}:{leave % 60:02d}",
         "arrival": f"{arrive // 60:02d}:{arrive % 60:02d}",
@@ -574,6 +576,19 @@ def _same_station(stop: dict[str, Any], station: dict[str, str]) -> bool:
         station_names(a, drop_city=True) & station_names(b, drop_city=False)
         or station_names(a, drop_city=False) & station_names(b, drop_city=True)
     )
+
+
+def _ride_minutes(leave_at: Any, arrive_at: Any, leave: int, arrive: int) -> int:
+    """Minutes from leave to arrive. HAFAS times carry their UTC offset, so
+    a ride across the DST change (02:50 CEST to 02:05 CET) is 15 minutes,
+    not 23 hours; clock times alone only wrap past midnight."""
+    start = dt_util.parse_datetime(str(leave_at)) if len(str(leave_at)) >= 16 else None
+    end = dt_util.parse_datetime(str(arrive_at)) if len(str(arrive_at)) >= 16 else None
+    if start is not None and end is not None and start.tzinfo and end.tzinfo:
+        minutes = int((end - start).total_seconds() // 60)
+        if minutes >= 0:
+            return minutes
+    return (arrive - leave) % (24 * 60)
 
 
 def _minute_of_day(value: Any) -> int | None:

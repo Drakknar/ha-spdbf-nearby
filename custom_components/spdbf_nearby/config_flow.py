@@ -78,11 +78,9 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
                 if server
                 else vol.Required(CONF_SERVER_URL)
             ): url,
-            (
-                vol.Optional(CONF_PUBLIC_URL, default=public)
-                if public
-                else vol.Optional(CONF_PUBLIC_URL)
-            ): url,
+            # Suggested, not a default: a default would come back when the
+            # field is cleared, so the public URL could never be removed.
+            vol.Optional(CONF_PUBLIC_URL, description={"suggested_value": public}): url,
             (
                 vol.Required(CONF_TRACKED_ENTITY, default=tracked)
                 if tracked
@@ -152,6 +150,12 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
     )
 
 
+def _with_public_url(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Store the public URL also when cleared: empty means the server URL
+    (an omitted key would let setup's value show through the options)."""
+    return {**user_input, CONF_PUBLIC_URL: str(user_input.get(CONF_PUBLIC_URL) or "").strip()}
+
+
 async def _validate(hass: HomeAssistant, user_input: dict[str, Any]) -> dict[str, str]:
     if not user_input[CONF_SOURCES]:
         return {CONF_SOURCES: "no_sources"}
@@ -192,7 +196,7 @@ class SpdbfConfigFlow(ConfigFlow, domain=DOMAIN):
                 state = self.hass.states.get(user_input[CONF_TRACKED_ENTITY])
                 who = state.name if state else user_input[CONF_TRACKED_ENTITY]
                 return self.async_create_entry(
-                    title=f"Stops near {who}", data=user_input
+                    title=f"Stops near {who}", data=_with_public_url(user_input)
                 )
         return self.async_show_form(
             step_id="user",
@@ -228,7 +232,7 @@ class SpdbfOptionsFlow(OptionsFlow):
             ):
                 errors = {}
             if not errors:
-                return self.async_create_entry(data=user_input)
+                return self.async_create_entry(data=_with_public_url(user_input))
         current = {
             **self.config_entry.data,
             **self.config_entry.options,

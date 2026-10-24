@@ -217,7 +217,7 @@ class LineStatusTool(_SpdbfTool):
             coordinator,
             self._place(hass, coordinator, args, llm_context, user_id),
             stop=args.get("stop"),
-            lines=args.get("lines") or [],
+            lines=args.get("lines"),
             within_minutes=args["within_minutes"],
         )
 
@@ -268,7 +268,10 @@ _LEG = {
     probatio.Optional("towards", description="The line must call at this station later."): str,
     probatio.Optional(
         "walk_minutes",
-        description="Walk before boarding: to the first stop, or the change (default 3).",
+        description=(
+            "Walk before boarding: to the first stop (default 0), or the change "
+            "(default 3; 0 for the same platform)."
+        ),
     ): _int(0, 60),
 }
 

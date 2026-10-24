@@ -30,6 +30,7 @@ from .const import (
     CONF_PROBLEM_AFTER,
     DEFAULT_FALLBACK,
     DEFAULT_PROBLEM_AFTER,
+    FALLBACK_STOPS,
     LAST_KNOWN_BOARD_REFRESH,
     PAUSED_STOP_REFRESH,
     SEARCH_MAX_RESULTS,
@@ -284,6 +285,25 @@ class TransportService:
             raise
         self.last_known.put("searches", key, [stop.as_dict() for stop in stops])
         return stops, ORIGIN_DBF, None
+
+    async def async_nearby_fallback(self, pos: Position, radius_m: float) -> list[Stop]:
+        """Return the nearest stops from Transitous, for Assist while DBF
+        can't look stops up: at most FALLBACK_STOPS within the radius, as the
+        map asks Transitous for at most that many stops while degraded."""
+        if self.transitous is None:
+            return []
+        try:
+            found = await self.transitous.async_nearby(pos)
+        except TransitousError as err:
+            _LOGGER.debug("Transitous nearby stops failed: %s", err)
+            return []
+        near = [
+            (meters, stop)
+            for stop in found
+            if (meters := distance_m(stop, pos)) is not None and meters <= radius_m
+        ]
+        near.sort(key=lambda item: item[0])
+        return [stop for _, stop in near[:FALLBACK_STOPS]]
 
     # --- Trips and rides -------------------------------------------------
 

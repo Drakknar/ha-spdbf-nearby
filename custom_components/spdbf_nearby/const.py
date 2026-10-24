@@ -84,6 +84,7 @@ ASSIST_MAX_ROWS = 30  # departures in one answer
 ASSIST_MAX_WINDOW = 180  # minutes ahead; a board holds BOARD_DEPARTURES rows anyway
 ASSIST_MAX_TRIPS = 8  # trip lookups per answer (towards, notices)
 ASSIST_MAX_OPTIONS = 3  # ways through a connection
+ASSIST_MAX_NOTICE = 300  # characters of one disruption notice
 
 REQUEST_TIMEOUT = 20  # seconds
 CONNECT_TIMEOUT = 5  # seconds; a server that is off fails fast
@@ -111,6 +112,7 @@ TRANSITOUS_URL = "https://api.transitous.org/api"
 TRANSITOUS_RADIUS_METERS = 50  # the station's platforms, not nearby bus stops
 TRANSITOUS_MATCH_METERS = 500  # a DBF stop matches a Transitous stop this close
 TRANSITOUS_BOARD_CACHE_TTL = timedelta(seconds=60)
+TRANSITOUS_NEARBY_CACHE_TTL = timedelta(seconds=60)
 TRANSITOUS_MAX_ROWS = 100
 FALLBACK_STOPS = 3
 # The other map stops show last known boards; when those run out (map stops

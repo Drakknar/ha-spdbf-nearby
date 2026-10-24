@@ -26,15 +26,18 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    ASSIST_MAX_NOTICE,
     ASSIST_MAX_OPTIONS,
     ASSIST_MAX_ROWS,
     ASSIST_MAX_TRIPS,
     ASSIST_MAX_WINDOW,
     DOMAIN,
+    HAFAS_SOURCES,
     SOURCE_DB,
+    SOURCE_TRANSITOUS,
 )
 from .coordinator import SpdbfCoordinator, position_of
-from .dbf import DbfError, distance_m
+from .dbf import DbfError, ServerUnreachable, distance_m
 from .service import ORIGIN_LAST_KNOWN, ORIGIN_TRANSITOUS
 from .stations import Board, Position, Stop, line_key, station_names, tidy_line
 
@@ -363,7 +366,24 @@ def _calls_after(
 # --- Stops and boards ------------------------------------------------------
 
 
+# No source had the board: DBF can't deliver, Transitous is off or failed,
+# and nothing is kept. Says nothing about the service itself.
+NO_DATA = "no_data"
+
+
+def _board_origin(board: Board) -> str:
+    """Return where a board's departures come from, or NO_DATA."""
+    if not board.departures and (board.unreachable or board.failed):
+        return NO_DATA
+    return board.origin
+
+
 def _source_note(origin: str, as_of: datetime | str | None) -> str:
+    if origin == NO_DATA:
+        return (
+            "No departures known: DBF can't deliver right now and no fallback "
+            "has any. This says nothing about whether the lines run."
+        )
     if origin == ORIGIN_TRANSITOUS:
         return (
             "Fallback data from Transitous because DBF can't deliver right now: "
@@ -399,10 +419,29 @@ async def _resolve_stop(
         raise AssistError(
             f"The position of {place.label} isn't known; name a stop or a place instead"
         )
-    stops = await coordinator.async_nearby(place.position)
+    stops = await _nearby(coordinator, place)
     if not stops:
         raise AssistError(f"No stops found near {place.label}")
     return stops[0]
+
+
+async def _nearby(coordinator: SpdbfCoordinator, place: Place) -> list[Stop]:
+    """Return the stops near a place; while DBF can't look them up, the
+    nearest few from Transitous (Assist only: the map keeps its own)."""
+    assert place.position is not None
+    try:
+        return await coordinator.async_nearby(place.position)
+    except DbfError as err:
+        # DBF's own refusals (an unpatched server) aren't outages.
+        if not (isinstance(err, ServerUnreachable) or coordinator.client.degraded):
+            raise
+        stops = await coordinator.async_nearby_fallback(place.position)
+        if not stops:
+            raise AssistError(
+                f"DBF can't look up stops near {place.label} right now ({err}), "
+                "and Transitous found none"
+            ) from err
+        return stops
 
 
 async def _stop_board(coordinator: SpdbfCoordinator, stop: Stop) -> Board:
@@ -426,6 +465,8 @@ def _upcoming(rows: list[Row], now: datetime, within: int) -> list[Row]:
 def _stop_json(stop: Stop, place: Place) -> dict[str, Any]:
     meters = distance_m(stop, place.position)
     out: dict[str, Any] = {"stop": stop.name}
+    if stop.source == SOURCE_TRANSITOUS:
+        out["stop_found_via"] = "Transitous, because DBF can't look up stops right now"
     if meters is not None:
         out["distance_m"] = round(meters)
         out["distance_from"] = place.label
@@ -449,8 +490,9 @@ async def departures(
     now = dt_util.now()
     within = min(within_minutes, ASSIST_MAX_WINDOW)
     rows = [row for row in _upcoming([_board_row(d) for d in board.departures], now, within) if filters(row)]
+    origin = _board_origin(board)
     result = _stop_json(found, place)
-    result["data"] = _source_note(board.origin, board.as_of)
+    result["data"] = _source_note(origin, board.as_of)
     if board.error and not board.departures:
         result["error"] = board.error
     if towards:
@@ -461,14 +503,22 @@ async def departures(
             )
     if per_platform:
         platforms: dict[str, list[dict[str, Any]]] = {}
+        listed = 0
         for row in rows:
-            group = platforms.setdefault(row.platform or "no platform", [])
-            if len(group) < per_platform:
-                group.append(row_json(row, now))
+            platform = row.platform or "no platform"
+            if len(platforms.get(platform, [])) >= per_platform:
+                continue
+            # A big station has many platforms: the answer stays as short as
+            # a flat list's longest.
+            if listed >= ASSIST_MAX_ROWS:
+                result["truncated"] = f"Only the first {ASSIST_MAX_ROWS} departures are listed."
+                break
+            platforms.setdefault(platform, []).append(row_json(row, now))
+            listed += 1
         result["platforms"] = dict(sorted(platforms.items()))
     else:
         result["departures"] = [row_json(row, now) for row in rows[: min(count, ASSIST_MAX_ROWS)]]
-    if not rows:
+    if not rows and origin != NO_DATA:
         result["note"] = f"No matching departures in the next {within} minutes."
     return result
 
@@ -478,7 +528,7 @@ async def line_status(
     place: Place,
     *,
     stop: str | None,
-    lines: list[str],
+    lines: str | list[str] | None,
     within_minutes: int,
 ) -> dict[str, Any]:
     """Return how each line at a stop is running: next departure, delays,
@@ -488,6 +538,8 @@ async def line_status(
     now = dt_util.now()
     within = min(within_minutes, ASSIST_MAX_WINDOW)
     rows = _upcoming([_board_row(d) for d in board.departures], now, within)
+    # The tool takes one line as text too ("S41"), not only a list.
+    lines = _as_list(lines)
     wanted = [line_key(tidy_line(line)) for line in lines]
     if wanted:
         rows = [row for row in rows if line_key(row.line) in wanted]
@@ -496,6 +548,8 @@ async def line_status(
         by_line.setdefault(row.line, []).append(row)
     summary = []
     trips = 0
+    # Notice text -> the first line it was listed for.
+    notices: dict[str, str] = {}
     for line, on_line in by_line.items():
         running = [row for row in on_line if not row.cancelled]
         delays = [row.delay for row in running if row.delay > 0]
@@ -520,19 +574,50 @@ async def line_status(
             except DbfError:
                 pass
             else:
-                if trip.get("messages"):
-                    item["notices"] = trip["messages"][:3]
+                _add_notices(item, line, trip.get("messages") or [], notices)
         summary.append(item)
+    origin = _board_origin(board)
     result = _stop_json(found, place)
-    result["data"] = _source_note(board.origin, board.as_of)
+    result["data"] = _source_note(origin, board.as_of)
     result["window_minutes"] = within
     result["lines"] = summary
     seen = {line_key(line) for line in by_line}
-    if missing := [line for line in lines if line_key(tidy_line(line)) not in seen]:
+    missing = [line for line in lines if line_key(tidy_line(line)) not in seen]
+    if missing and origin != NO_DATA:
         result["not_running_in_window"] = missing
     if board.error and not board.departures:
         result["error"] = board.error
     return result
+
+
+def _short_notice(text: Any) -> str:
+    text = " ".join(str(text or "").split())
+    if len(text) <= ASSIST_MAX_NOTICE:
+        return text
+    return text[: ASSIST_MAX_NOTICE - 1].rstrip() + "…"
+
+
+def _add_notices(
+    item: dict[str, Any], line: str, messages: list[Any], seen: dict[str, str]
+) -> None:
+    """Add a line's first 3 notices, shortened; a notice already listed for
+    another line (a station-wide one, often on every trip) only names it."""
+    fresh: list[str] = []
+    same_as: list[str] = []
+    for message in messages[:3]:
+        text = _short_notice(message)
+        if not text:
+            continue
+        if text in seen:
+            if seen[text] != line and seen[text] not in same_as:
+                same_as.append(seen[text])
+        elif text not in fresh:
+            seen[text] = line
+            fresh.append(text)
+    if fresh:
+        item["notices"] = fresh
+    if same_as:
+        item["same_notices_as"] = same_as
 
 
 async def nearby_stops(
@@ -541,7 +626,7 @@ async def nearby_stops(
     """Return the stops near a place, with the lines seen there."""
     if place.position is None:
         raise AssistError(f"The position of {place.label} isn't known")
-    stops = await coordinator.async_nearby(place.position)
+    stops = await _nearby(coordinator, place)
     out = []
     for stop in stops[:count]:
         item = _stop_json(stop, place)
@@ -549,7 +634,13 @@ async def nearby_stops(
         if lines := list(dict.fromkeys(d.get("line") for d in stop.board.departures if d.get("line"))):
             item["lines_seen"] = lines
         out.append(item)
-    return {"near": place.label, "stops": out}
+    result: dict[str, Any] = {"near": place.label, "stops": out}
+    if any(stop.source == SOURCE_TRANSITOUS for stop in stops):
+        result["data"] = (
+            "Fallback data from Transitous because DBF can't look up stops right "
+            "now: only the nearest few stops."
+        )
+    return result
 
 
 # --- Connections: legs with rides and changes ------------------------------
@@ -570,6 +661,9 @@ class Leg:
     # Where it ends: the next leg's stop, or a station by name (last leg).
     ride_to: dict[str, Any] | None = None
     walk_after: int = 0
+    # The lines the ride is timed on; None: the departure's own line. A
+    # commute leg uses its card's, so both ask (and keep) the same ride.
+    ride_lines: list[str] | None = None
 
 
 async def _leg_rows(coordinator: SpdbfCoordinator, leg: Leg, now: datetime) -> tuple[list[Row], str]:
@@ -626,7 +720,7 @@ async def _follow(
         ride = await coordinator.client.async_ride(
             {k: leg.stop[k] for k in ("eva", "name", "network") if leg.stop.get(k)},
             {k: leg.ride_to[k] for k in ("eva", "name") if leg.ride_to.get(k)},
-            [row.line],
+            [row.line] if leg.ride_lines is None else leg.ride_lines,
         )
         if ride is None:
             step["ride"] = "unknown"
@@ -634,7 +728,7 @@ async def _follow(
             break
         arrival = row.expected + timedelta(minutes=ride["minutes"])
         step["ride_minutes"] = ride["minutes"]
-        step["arrives"] = f"{_clock(arrival)} at {leg.ride_to.get('name')}"
+        step["arrives"] = f"{_clock(arrival)} at {leg.ride_to.get('title') or leg.ride_to.get('name')}"
         if i + 1 == len(legs):
             option["arrival"] = _clock(arrival)
             if leg.walk_after:
@@ -663,7 +757,7 @@ def board_leg(
 
     async def rows() -> tuple[list[Row], str, Any]:
         board = await _stop_board(coordinator, stop)
-        return [_board_row(d) for d in board.departures], board.origin, board.as_of
+        return [_board_row(d) for d in board.departures], _board_origin(board), board.as_of
 
     return rows
 
@@ -682,6 +776,8 @@ async def connection(
     stops = [await _resolve_stop(coordinator, leg.get("stop"), place) for leg in legs]
     built: list[Leg] = []
     for i, (spec, stop) in enumerate(zip(legs, stops, strict=True)):
+        # 0 is a real answer (a change on the same platform), not "unset".
+        walk = spec.get("walk_minutes")
         if i + 1 < len(stops):
             ride_to: dict[str, Any] | None = {"eva": stops[i + 1].eva, "name": stops[i + 1].name}
         else:
@@ -693,7 +789,7 @@ async def connection(
                 rows=board_leg(coordinator, stop),
                 filters=Filters.of(spec),
                 towards=spec.get("towards"),
-                walk_before=int(spec.get("walk_minutes") or (0 if i == 0 else 3)),
+                walk_before=int(walk) if walk is not None else (0 if i == 0 else 3),
                 ride_to=ride_to,
                 walk_after=walk_after if i + 1 == len(stops) else 0,
             )
@@ -794,7 +890,29 @@ def relevant_now(
     return all(results)
 
 
-def _sensor_stop(state: State | None, title: str) -> dict[str, Any] | None:
+def _configured_network(hass: HomeAssistant, entity_id: str) -> str | None:
+    """The network a db_infoscreen sensor is set up for (its data source),
+    if it is one DBF serves here: DB (IRIS) or a HAFAS service."""
+    entity = er.async_get(hass).async_get(entity_id)
+    entry = (
+        hass.config_entries.async_get_entry(entity.config_entry_id)
+        if entity is not None and entity.config_entry_id
+        else None
+    )
+    if entry is None or entry.domain != "db_infoscreen":
+        return None
+    source = str({**entry.data, **entry.options}.get("data_source") or "IRIS-TTS")
+    if source == "IRIS-TTS":
+        return SOURCE_DB
+    # "BVG – Berliner Verkehrsbetriebe", or older entries' "hafas=BVG".
+    # EFA sources aren't DBF HAFAS services; "AVV" is both (Aachen: HAFAS).
+    if source.startswith("efa=") or (source.startswith("AVV ") and "Aachen" not in source):
+        return None
+    code = source.split(" – ", 1)[0] if " – " in source else source.rsplit("=", 1)[-1]
+    return next((s for s in HAFAS_SOURCES if s.casefold() == code.strip().casefold()), None)
+
+
+def _sensor_stop(hass: HomeAssistant, state: State | None, title: str) -> dict[str, Any] | None:
     """The station of a db_infoscreen sensor, as the connection card finds it."""
     if state is None:
         return None
@@ -802,10 +920,25 @@ def _sensor_stop(state: State | None, title: str) -> dict[str, Any] | None:
     if not station:
         return None
     first = (state.attributes.get("next_departures") or [None])[0]
-    # HAFAS stop ids are numbers (BVG: 900...); IRIS stations are names.
-    network = "BVG" if isinstance(first, dict) and "scheduledDeparture" not in first else SOURCE_DB
+    if isinstance(first, dict):
+        # HAFAS rows have scheduledTime, IRIS rows scheduledDeparture.
+        network = "BVG" if "scheduledDeparture" not in first else SOURCE_DB
+    else:
+        # No departures (at night): the rows can't tell, the sensor's
+        # setup can. A BVG stop isn't a DB station for the night.
+        network = _configured_network(hass, state.entity_id) or SOURCE_DB
     name = (title or station) if station.isdigit() else station
     return {"eva": station, "name": name, "network": network}
+
+
+def _card_ride_lines(state: State | None, card: dict[str, Any], stop: dict[str, Any]) -> list[str]:
+    """The lines a connection card times its ride on: those of the sensor's
+    rows it shows, all the sensor's if it shows none (sorted, as the card
+    sends them; empty means any line)."""
+    raw = state.attributes.get("next_departures") if state else None
+    rows = [_sensor_row(d, stop) for d in raw if isinstance(d, dict)] if isinstance(raw, list) else []
+    shown = [row for row in rows if Filters.of(card)(row)] or rows
+    return sorted({row.line for row in shown if row.line})
 
 
 def sensor_leg(
@@ -821,9 +954,19 @@ def sensor_leg(
         if isinstance(sensor_rows, list) and not coordinator.client.degraded:
             return [_sensor_row(d, stop) for d in sensor_rows if isinstance(d, dict)], "dbf", None
         board = await coordinator.async_board(stop["eva"], stop["network"], name=stop["name"])
-        return [_board_row(d) for d in board.departures], board.origin, board.as_of
+        return [_board_row(d) for d in board.departures], _board_origin(board), board.as_of
 
     return rows
+
+
+def _card_int(value: Any, default: int) -> int:
+    """A whole number from a card's YAML ("3", 3.5, "3.5"); default if it
+    isn't one, as the card itself goes on with it."""
+    try:
+        number = int(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return max(0, number)
 
 
 def _commute_legs(
@@ -842,17 +985,24 @@ def _commute_legs(
         seen.add(card["entity"])
         state = hass.states.get(card["entity"])
         title = card.get("title") or (state.name if state else card["entity"])
-        stop = _sensor_stop(state, title)
+        # Named as the card names it (its title, else the stop id), so the
+        # ride keys match the card's.
+        stop = _sensor_stop(hass, state, card.get("title") or "")
         if stop is None:
             raise AssistError(f"The sensor of '{title}' ({card['entity']}) has no station right now")
         nxt = by_entity.get(card.get("ride_to") or "")
         ride_to = None
         if card.get("ride_to"):
             nxt_state = hass.states.get(card["ride_to"])
-            ride_to = _sensor_stop(nxt_state, (nxt or {}).get("title", ""))
-        elif card.get("ride_to_station"):
-            ride_to = {"name": card["ride_to_station"]}
-        walk = int(card.get("walk_minutes") or 0)
+            ride_to = _sensor_stop(hass, nxt_state, "")
+            if ride_to is not None:
+                # Shown in the answer; the ride itself goes by eva and name.
+                ride_to["title"] = (nxt or {}).get("title") or (
+                    nxt_state.name if nxt_state else ride_to["name"]
+                )
+        elif str(card.get("ride_to_station") or "").strip():
+            ride_to = {"name": str(card["ride_to_station"]).strip()}
+        walk = _card_int(card.get("walk_minutes"), 0)
         legs.append(
             Leg(
                 title=title,
@@ -862,6 +1012,7 @@ def _commute_legs(
                 walk_before=walk_before,
                 ride_to=ride_to,
                 walk_after=walk if nxt is None else 0,
+                ride_lines=_card_ride_lines(state, card, stop),
             )
         )
         walk_before = walk
@@ -920,7 +1071,7 @@ async def _commute_boards(
     for card in commute.cards:
         state = hass.states.get(card["entity"])
         title = card.get("title") or (state.name if state else card["entity"])
-        stop = _sensor_stop(state, title)
+        stop = _sensor_stop(hass, state, title)
         if stop is None:
             boards.append({"at": title, "error": "its sensor has no station right now"})
             continue
@@ -929,7 +1080,7 @@ async def _commute_boards(
         boards.append({
             "at": title,
             "data": _source_note(origin, as_of),
-            "departures": [row_json(r, now) for r in rows[: int(card.get("departures") or 5)]],
+            "departures": [row_json(r, now) for r in rows[: _card_int(card.get("departures"), 5) or 5]],
         })
     return boards
 
