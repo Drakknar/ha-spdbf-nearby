@@ -86,5 +86,12 @@
       "title": "DBF isn't delivering departures",
       "description": "spdbf Public Transport hasn't had a working departure board from DBF at {server} since {since} ({reason}). It checks every minute.\n\n{fallback}\n\nIf DBF itself is unreachable, check that the db-fakedisplay container is running. If DBF answers with errors, DB's or a transport company's systems are failing, and there's nothing to fix on your side. This notice disappears by itself once DBF delivers again."
     }
+  },
+  "entity": {
+    "binary_sensor": {
+      "dbf_problem": {
+        "name": "DBF problem"
+      }
+    }
   }
 }

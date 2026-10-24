@@ -186,7 +186,7 @@ The dialog, the cards and the stop entities say where the data comes from: "from
 - **Assist, nearest stop:** a question without a stop, asked away from the tracked person, gets the 3 nearest stops from Transitous, and the answer says so.
 - **Map stops:** stops already on the map stay. Only the 3 nearest ask Transitous; the others show their last known departures, and once those have left, ask Transitous at most every 5 minutes. New stops are only looked up in DBF: if it's down when Home Assistant starts, the map starts empty and fills once DBF answers, while the cards, the search and the status checks already work.
 - **Status checks:** every minute the integration fetches one live board per network from DBF (Berlin Hbf for DB and BVG, else the nearest map stop of that network), past any cache in front of DBF. When a network's checks have failed for the "Report DBF as down after" time (10 minutes by default):
-  - `binary_sensor.spdbf_dbf_problem` turns on (device class *problem*; attributes `failing_since` and, per network, since when and why);
+  - the *DBF problem* sensor turns on (`binary_sensor.spdbf_public_transport_dbf_problem` on new installs; installs before 0.11.1 keep their entity id, e.g. `binary_sensor.spdbf_dbf_problem`) (device class *problem*; attributes `failing_since` and, per network, since when and why);
   - a Repairs notice appears;
   - the cards and the dialog show "Live data from DBF unavailable since 14:05".
 
