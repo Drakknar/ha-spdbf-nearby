@@ -78,22 +78,24 @@ jobs:
           CTX
           fi
 
-          # DBF has no releases; any commit to its server code (lib/) counts.
-          sha=$(gh api "repos/derf/db-fakedisplay/commits?path=lib&per_page=1" --jq '.[0].sha')
+          # DBF publishes no GitHub releases, only version tags (4.38.1); each new
+          # tag is reviewed. Commits between tags are not.
+          tag=$(gh api "repos/derf/db-fakedisplay/tags?per_page=100" --jq '.[].name' \
+            | grep -E '^[0-9]+(\.[0-9]+)+$' | sort -V | tail -n1)
           prev=$(w get dbf:last)
           if [ -z "$prev" ]; then
-            w set "dbf:last=$sha" # first run: only record where we start
+            w set "dbf:last=$tag" # first run: only record where we start
           else
             # Already reviewed: a repeat (force) covers the same range again.
-            [ "$prev" != "$sha" ] || prev=$(w get "dbf:from:$sha")
+            [ "$prev" != "$tag" ] || prev=$(w get "dbf:from:$tag")
           fi
-          if [ -n "$prev" ] && due "dbf:$sha"; then
-            keys+=("dbf:$sha=@" "dbf:from:$sha=$prev" "dbf:last=$sha")
-            subjects+=("DBF ${sha:0:7}")
+          if [ -n "$prev" ] && due "dbf:$tag"; then
+            keys+=("dbf:$tag=@" "dbf:from:$tag=$prev" "dbf:last=$tag")
+            subjects+=("DBF $tag")
             cat >> "$ctx" <<CTX
           ## DBF (db-fakedisplay) server
-          - Last reviewed commit: $prev. New: $sha.
-          - Source: https://github.com/derf/db-fakedisplay/compare/$prev...$sha
+          - Last reviewed: $prev. New: $tag.
+          - Source: https://github.com/derf/db-fakedisplay/compare/$prev...$tag
 
           CTX
           fi
