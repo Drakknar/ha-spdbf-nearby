@@ -684,6 +684,8 @@ async def connection(
     stops = [await _resolve_stop(coordinator, leg.get("stop"), place) for leg in legs]
     built: list[Leg] = []
     for i, (spec, stop) in enumerate(zip(legs, stops, strict=True)):
+        # 0 is a real answer (a change on the same platform), not "unset".
+        walk = spec.get("walk_minutes")
         if i + 1 < len(stops):
             ride_to: dict[str, Any] | None = {"eva": stops[i + 1].eva, "name": stops[i + 1].name}
         else:
@@ -695,7 +697,7 @@ async def connection(
                 rows=board_leg(coordinator, stop),
                 filters=Filters.of(spec),
                 towards=spec.get("towards"),
-                walk_before=int(spec.get("walk_minutes") or (0 if i == 0 else 3)),
+                walk_before=int(walk) if walk is not None else (0 if i == 0 else 3),
                 ride_to=ride_to,
                 walk_after=walk_after if i + 1 == len(stops) else 0,
             )

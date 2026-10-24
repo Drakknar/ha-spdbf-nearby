@@ -66,3 +66,23 @@ async def test_line_status_accepts_one_line_as_text() -> None:
     )
     assert [item["line"] for item in result["lines"]] == ["S41"]
     assert "not_running_in_window" not in result
+
+
+async def test_connection_keeps_a_zero_minute_change() -> None:
+    """walk_minutes 0 on a later leg (same-platform change) is not the default 3."""
+    coordinator = FakeCoordinator(
+        {
+            "A": [_dep("S5", 2)],
+            # Arrival at B is 12.5 min from now; the U2 at +13 is catchable
+            # with a 0-minute change, not with the default 3.
+            "B": [_dep("U2", 13), _dep("U2", 30)],
+        },
+        ride_minutes=10,
+    )
+    legs = [
+        {"stop": "A", "lines": "S5"},
+        {"stop": "B", "lines": "U2", "walk_minutes": 0},
+    ]
+    result = await assist.connection(coordinator, PLACE, legs, None, 0, 1)
+    steps = result["options"][0]["legs"]
+    assert steps[1]["in_minutes"] == 13
