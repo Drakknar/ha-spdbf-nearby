@@ -9,9 +9,11 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import SpdbfConfigEntry
+from .const import DOMAIN
 from .status import DbfStatus
 
 
@@ -34,7 +36,8 @@ class DbfProblemSensor(BinarySensorEntity):
 
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_should_poll = False
-    _attr_name = "spdbf DBF problem"
+    _attr_has_entity_name = True
+    _attr_translation_key = "dbf_problem"
     _attr_icon = "mdi:train-variant"
     # Every check rewrites last_check; history needs only the on/off state.
     _unrecorded_attributes = frozenset({"failing", "last_check", "fallback", "spdbf_status"})
@@ -43,6 +46,14 @@ class DbfProblemSensor(BinarySensorEntity):
         """Initialize the sensor."""
         self._status = status
         self._attr_unique_id = f"{entry_id}_dbf_problem"
+        # A service device gives the sensor its name prefix and a home on
+        # the device page; existing installs keep their entity id.
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry_id)},
+            name="spdbf Public Transport",
+            manufacturer="spdbf",
+            entry_type=DeviceEntryType.SERVICE,
+        )
 
     async def async_added_to_hass(self) -> None:
         """Follow the status checks."""
