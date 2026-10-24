@@ -363,7 +363,24 @@ def _calls_after(
 # --- Stops and boards ------------------------------------------------------
 
 
+# No source had the board: DBF can't deliver, Transitous is off or failed,
+# and nothing is kept. Says nothing about the service itself.
+NO_DATA = "no_data"
+
+
+def _board_origin(board: Board) -> str:
+    """Return where a board's departures come from, or NO_DATA."""
+    if not board.departures and (board.unreachable or board.failed):
+        return NO_DATA
+    return board.origin
+
+
 def _source_note(origin: str, as_of: datetime | str | None) -> str:
+    if origin == NO_DATA:
+        return (
+            "No departures known: DBF can't deliver right now and no fallback "
+            "has any. This says nothing about whether the lines run."
+        )
     if origin == ORIGIN_TRANSITOUS:
         return (
             "Fallback data from Transitous because DBF can't deliver right now: "
@@ -449,8 +466,9 @@ async def departures(
     now = dt_util.now()
     within = min(within_minutes, ASSIST_MAX_WINDOW)
     rows = [row for row in _upcoming([_board_row(d) for d in board.departures], now, within) if filters(row)]
+    origin = _board_origin(board)
     result = _stop_json(found, place)
-    result["data"] = _source_note(board.origin, board.as_of)
+    result["data"] = _source_note(origin, board.as_of)
     if board.error and not board.departures:
         result["error"] = board.error
     if towards:
@@ -476,7 +494,7 @@ async def departures(
         result["platforms"] = dict(sorted(platforms.items()))
     else:
         result["departures"] = [row_json(row, now) for row in rows[: min(count, ASSIST_MAX_ROWS)]]
-    if not rows:
+    if not rows and origin != NO_DATA:
         result["note"] = f"No matching departures in the next {within} minutes."
     return result
 
@@ -533,12 +551,14 @@ async def line_status(
                 if trip.get("messages"):
                     item["notices"] = trip["messages"][:3]
         summary.append(item)
+    origin = _board_origin(board)
     result = _stop_json(found, place)
-    result["data"] = _source_note(board.origin, board.as_of)
+    result["data"] = _source_note(origin, board.as_of)
     result["window_minutes"] = within
     result["lines"] = summary
     seen = {line_key(line) for line in by_line}
-    if missing := [line for line in lines if line_key(tidy_line(line)) not in seen]:
+    missing = [line for line in lines if line_key(tidy_line(line)) not in seen]
+    if missing and origin != NO_DATA:
         result["not_running_in_window"] = missing
     if board.error and not board.departures:
         result["error"] = board.error
@@ -673,7 +693,7 @@ def board_leg(
 
     async def rows() -> tuple[list[Row], str, Any]:
         board = await _stop_board(coordinator, stop)
-        return [_board_row(d) for d in board.departures], board.origin, board.as_of
+        return [_board_row(d) for d in board.departures], _board_origin(board), board.as_of
 
     return rows
 
@@ -833,7 +853,7 @@ def sensor_leg(
         if isinstance(sensor_rows, list) and not coordinator.client.degraded:
             return [_sensor_row(d, stop) for d in sensor_rows if isinstance(d, dict)], "dbf", None
         board = await coordinator.async_board(stop["eva"], stop["network"], name=stop["name"])
-        return [_board_row(d) for d in board.departures], board.origin, board.as_of
+        return [_board_row(d) for d in board.departures], _board_origin(board), board.as_of
 
     return rows
 

@@ -43,7 +43,7 @@ class FakeService:
 
 
 class FakeCoordinator:
-    def __init__(self, boards: dict[str, list[dict[str, Any]]], ride_minutes: int = 10) -> None:
+    def __init__(self, boards: dict[str, list[dict[str, Any]] | None], ride_minutes: int = 10) -> None:
         stops = {
             name: Stop(name=name, eva=str(i), source="BVG", latitude=52.5, longitude=13.3)
             for i, name in enumerate(boards)
@@ -52,6 +52,9 @@ class FakeCoordinator:
         self.client = FakeService(stops, ride_minutes)
 
     async def async_board(self, eva: str, source: str, linked: Any = None, **_: Any) -> Board:
+        if self.boards[eva] is None:
+            # DBF unreachable, Transitous off or failing, nothing kept.
+            return Board(error="Your DBF server isn't reachable", unreachable=True)
         return Board(departures=self.boards[eva])
 
 
@@ -105,3 +108,26 @@ async def test_per_platform_answer_is_bounded() -> None:
     total = sum(len(rows) for rows in result["platforms"].values())
     assert total <= assist.ASSIST_MAX_ROWS
     assert "truncated" in result
+
+
+async def test_no_data_is_not_reported_as_no_service() -> None:
+    """With no source delivering, lines aren't "not running" and data isn't "Live."."""
+    coordinator = FakeCoordinator({"Westkreuz": None})
+    status = await assist.line_status(
+        coordinator, PLACE, stop="Westkreuz", lines=["S41"], within_minutes=60
+    )
+    assert status["data"] != "Live."
+    assert "not_running_in_window" not in status
+    deps = await assist.departures(
+        coordinator,
+        PLACE,
+        stop="Westkreuz",
+        filters=assist.Filters.of({}),
+        towards=None,
+        per_platform=None,
+        count=8,
+        within_minutes=60,
+    )
+    assert deps["data"] != "Live."
+    assert "note" not in deps
+    assert deps["error"]
