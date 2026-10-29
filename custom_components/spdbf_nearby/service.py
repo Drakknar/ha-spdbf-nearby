@@ -12,8 +12,6 @@ Every feature asks this service, never a source directly:
 It also runs DBF's status checks (status.py).
 """
 
-from __future__ import annotations
-
 import asyncio
 from datetime import datetime, timedelta
 import json
@@ -53,7 +51,9 @@ ORIGIN_LAST_KNOWN = "last_known"
 class TransportService:
     """Departures, trips, search and rides, with fallbacks."""
 
-    def __init__(self, hass: HomeAssistant, config: dict[str, Any], entry_id: str) -> None:
+    def __init__(
+        self, hass: HomeAssistant, config: dict[str, Any], entry_id: str
+    ) -> None:
         """Initialize the service of one config entry."""
         self.dbf = DbfClient(hass, config)
         fallback = bool(config.get(CONF_FALLBACK, DEFAULT_FALLBACK))
@@ -65,7 +65,9 @@ class TransportService:
             hass,
             entry_id,
             self.dbf.server,
-            timedelta(minutes=int(config.get(CONF_PROBLEM_AFTER, DEFAULT_PROBLEM_AFTER))),
+            timedelta(
+                minutes=int(config.get(CONF_PROBLEM_AFTER, DEFAULT_PROBLEM_AFTER))
+            ),
             fallback,
         )
 
@@ -179,7 +181,9 @@ class TransportService:
         if kept:
             return kept
         if self.transitous is not None and (live or self._paused_refresh_due(key)):
-            if board := await self._transitous_board(eva, source, name, pos, rows, keep):
+            if board := await self._transitous_board(
+                eva, source, name, pos, rows, keep
+            ):
                 self._keep_board(key, board)
                 return board
         if live and (kept := self._kept_board(key, keep)):
@@ -204,7 +208,9 @@ class TransportService:
         try:
             stop_id = await self.transitous.async_stop_id(eva, source, name, pos)
             if stop_id is None:
-                _LOGGER.debug("No Transitous stop matches %s %s (%s)", source, eva, name)
+                _LOGGER.debug(
+                    "No Transitous stop matches %s %s (%s)", source, eva, name
+                )
                 return None
             departures = await self.transitous.async_departures(
                 stop_id, min(rows, TRANSITOUS_MAX_ROWS)
@@ -223,8 +229,7 @@ class TransportService:
         return True
 
     def _keep_board(self, key: str, board: Board) -> None:
-        """Remember a board with departures; a short one doesn't replace a
-        longer recent one (map stops keep a few rows, the dialog many)."""
+        """Remember a board with departures; a short one doesn't replace a longer recent one (map stops keep a few rows, the dialog many)."""
         if not board.departures:
             return
         if kept := self.last_known.get("boards", key):
@@ -273,7 +278,9 @@ class TransportService:
                 except TransitousError as t_err:
                     _LOGGER.debug("Transitous search failed: %s", t_err)
                 else:
-                    ranked = rank_search(found, query, lambda stop: distance_m(stop, pos))
+                    ranked = rank_search(
+                        found, query, lambda stop: distance_m(stop, pos)
+                    )
                     return ranked[:SEARCH_MAX_RESULTS], ORIGIN_TRANSITOUS, None
             if kept := self.last_known.get("searches", key):
                 when, value = kept
@@ -287,9 +294,7 @@ class TransportService:
         return stops, ORIGIN_DBF, None
 
     async def async_nearby_fallback(self, pos: Position, radius_m: float) -> list[Stop]:
-        """Return the nearest stops from Transitous, for Assist while DBF
-        can't look stops up: at most FALLBACK_STOPS within the radius, as the
-        map asks Transitous for at most that many stops while degraded."""
+        """Return the nearest stops from Transitous, for Assist while DBF can't look stops up: at most FALLBACK_STOPS within the radius, as the map asks Transitous for at most that many stops while degraded."""
         if self.transitous is None:
             return []
         try:
@@ -313,7 +318,8 @@ class TransportService:
         try:
             if "transitous" in trip:
                 if self.transitous is None:
-                    raise DbfError("The Transitous fallback is turned off")
+                    # Raised inside the try on purpose: the last known trip still answers.
+                    raise DbfError("The Transitous fallback is turned off")  # noqa: TRY301
                 data = await self.transitous.async_trip(trip["transitous"])
                 origin = ORIGIN_TRANSITOUS
             else:

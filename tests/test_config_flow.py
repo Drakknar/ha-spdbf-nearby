@@ -1,7 +1,5 @@
 """Options flow (config_flow.py) through Home Assistant's flow manager."""
 
-from __future__ import annotations
-
 from unittest.mock import patch
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -20,8 +18,7 @@ SERVER = "http://dbf.local:8092"
 
 
 async def test_public_url_can_be_cleared(hass, aioclient_mock) -> None:
-    """Emptying the public URL in the options stores it empty, so links go
-    to the server URL again instead of the old public URL."""
+    """Emptying the public URL in the options stores it empty, so links go to the server URL again instead of the old public URL."""
     aioclient_mock.post(f"{SERVER}/_geolocation", json={"candidates": []})
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -47,11 +44,13 @@ async def test_public_url_can_be_cleared(hass, aioclient_mock) -> None:
         # Shown, but not a default the cleared field would fall back to.
         assert key.description == {"suggested_value": "https://dbf.example.org"}
         # The field cleared: the frontend sends no key, and none comes back.
-        user_input = form["data_schema"]({
-            CONF_SERVER_URL: SERVER,
-            CONF_TRACKED_ENTITY: "person.me",
-            CONF_SOURCES: ["DB", "BVG"],
-        })
+        user_input = form["data_schema"](
+            {
+                CONF_SERVER_URL: SERVER,
+                CONF_TRACKED_ENTITY: "person.me",
+                CONF_SOURCES: ["DB", "BVG"],
+            }
+        )
         assert CONF_PUBLIC_URL not in user_input
         result = await flow.async_step_init(user_input)
     assert result["type"] == "create_entry"

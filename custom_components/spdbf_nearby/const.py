@@ -37,9 +37,32 @@ SOURCE_DB = "DB"
 DB_FALLBACK_HAFAS = "ÖBB"
 DEFAULT_SOURCES = [SOURCE_DB, "BVG"]
 HAFAS_SOURCES = [
-    "BVG", "VBB", "ÖBB", "AVV", "BART", "BLS", "CFL", "CMTA", "DSB", "IE",
-    "KVB", "mobiliteit", "NAHSH", "NASA", "NVV", "PKP", "Resrobot", "RMV",
-    "RSAG", "SaarVV", "STV", "TPG", "VBN", "VMT", "VOS", "ZVV",
+    "BVG",
+    "VBB",
+    "ÖBB",
+    "AVV",
+    "BART",
+    "BLS",
+    "CFL",
+    "CMTA",
+    "DSB",
+    "IE",
+    "KVB",
+    "mobiliteit",
+    "NAHSH",
+    "NASA",
+    "NVV",
+    "PKP",
+    "Resrobot",
+    "RMV",
+    "RSAG",
+    "SaarVV",
+    "STV",
+    "TPG",
+    "VBN",
+    "VMT",
+    "VOS",
+    "ZVV",
 ]
 # Served from www/. FRONTEND_VERSION is the cache-busting query string: the
 # release version, so every release makes browsers and the companion app fetch

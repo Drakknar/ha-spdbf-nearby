@@ -5,8 +5,6 @@ these join the Assist API, so conversation agents (and Home Assistant's MCP
 server) can call them. They only read. The answers come from assist.py.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from typing import Any, override
 
@@ -33,9 +31,9 @@ PROMPT = (
     "For public transport use the spdbf_nearby tools: departures of a stop, "
     "stops nearby, whether lines run or are disrupted, a connection with "
     "changes, and the user's commutes from their dashboard (\"my train to "
-    "work\"). Without a stop they use the stop nearest to the user. Platforms "
+    'work"). Without a stop they use the stop nearest to the user. Platforms '
     "are directions at train stations. When an answer's `data` isn't "
-    "\"Live.\", say so."
+    '"Live.", say so.'
 )
 
 _STOP = probatio.Optional(
@@ -52,9 +50,7 @@ _NEAR = probatio.Optional(
         "'home' or 'Work' (a zone or person). Leave out for the user's location."
     ),
 )
-_LINES = probatio.Optional(
-    "lines", description="Only these lines, e.g. ['S3', 'M49']."
-)
+_LINES = probatio.Optional("lines", description="Only these lines, e.g. ['S3', 'M49'].")
 _WITHIN = probatio.Optional(
     "within_minutes",
     description=f"How far ahead to look, in minutes (default 60, at most {ASSIST_MAX_WINDOW}).",
@@ -109,7 +105,9 @@ class _SpdbfTool(Tool):
         llm_context: LLMContext,
         user_id: str | None,
     ) -> assist.Place:
-        return assist.locate(hass, coordinator, args.get("near"), llm_context.device_id, user_id)
+        return assist.locate(
+            hass, coordinator, args.get("near"), llm_context.device_id, user_id
+        )
 
 
 class DeparturesTool(_SpdbfTool):
@@ -263,9 +261,15 @@ _LEG = {
         description="Where this leg starts; leave out only on the first leg for the nearest stop.",
     ): str,
     probatio.Optional("lines", description="Lines to take, e.g. ['S5', 'S7']."): _TEXTS,
-    probatio.Optional("platforms", description="Platform(s) = direction, e.g. ['3']."): _TEXTS,
-    probatio.Optional("destination", description="Final destination contains this."): str,
-    probatio.Optional("towards", description="The line must call at this station later."): str,
+    probatio.Optional(
+        "platforms", description="Platform(s) = direction, e.g. ['3']."
+    ): _TEXTS,
+    probatio.Optional(
+        "destination", description="Final destination contains this."
+    ): str,
+    probatio.Optional(
+        "towards", description="The line must call at this station later."
+    ): str,
     probatio.Optional(
         "walk_minutes",
         description=(
@@ -293,7 +297,8 @@ class ConnectionTool(_SpdbfTool):
         {
             probatio.Required("legs", description="The legs in order."): [_LEG],
             probatio.Optional(
-                "to", description="Station where the last leg gets off, for its arrival time."
+                "to",
+                description="Station where the last leg gets off, for its arrival time.",
             ): str,
             probatio.Optional(
                 "walk_after_minutes",
@@ -316,9 +321,7 @@ class ConnectionTool(_SpdbfTool):
         llm_context: LLMContext,
         user_id: str | None,
     ) -> dict[str, Any]:
-        legs = [
-            {**leg, "destinations": leg.get("destination")} for leg in args["legs"]
-        ]
+        legs = [{**leg, "destinations": leg.get("destination")} for leg in args["legs"]]
         return await assist.connection(
             coordinator,
             self._place(hass, coordinator, args, llm_context, user_id),
@@ -393,4 +396,3 @@ def async_get_tools(
     ):
         return None
     return LLMTools(tools=[tool() for tool in TOOLS], prompt=PROMPT)
-

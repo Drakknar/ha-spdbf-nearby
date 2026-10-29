@@ -1,7 +1,5 @@
 """Ride times (dbf.py) from HAFAS trips."""
 
-from __future__ import annotations
-
 from custom_components.spdbf_nearby.dbf import _ride_on
 
 
@@ -28,6 +26,7 @@ def test_ride_across_the_autumn_dst_change() -> None:
 
 
 def test_ride_past_midnight() -> None:
+    """Test a ride that starts before and ends after midnight."""
     ride = _ride_on(
         _trip("2026-10-23T23:55:00+02:00", "2026-10-24T00:10:00+02:00"),
         {"eva": "1"},
@@ -35,4 +34,6 @@ def test_ride_past_midnight() -> None:
     )
     assert ride["minutes"] == 15
     # Clock times only (no date): still wraps past midnight.
-    assert _ride_on(_trip("23:55", "00:10"), {"eva": "1"}, {"eva": "2"})["minutes"] == 15
+    assert (
+        _ride_on(_trip("23:55", "00:10"), {"eva": "1"}, {"eva": "2"})["minutes"] == 15
+    )

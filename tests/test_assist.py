@@ -1,15 +1,17 @@
 """Assist answers (assist.py) on a fake coordinator: no Home Assistant needed."""
 
-from __future__ import annotations
-
 from datetime import timedelta
 from typing import Any
 
-from homeassistant.core import State
-from homeassistant.util import dt as dt_util
+import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.spdbf_nearby import assist
+from custom_components.spdbf_nearby.dbf import DbfError, ServerUnreachable
 from custom_components.spdbf_nearby.stations import Board, Stop
+from homeassistant.core import State
+from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 
 
 def _dep(
@@ -36,35 +38,51 @@ def _dep(
 
 
 class FakeService:
+    """Stand-in for the integration's client: stop search, rides and trips."""
+
     degraded = False
 
     def __init__(self, stops: dict[str, Stop], ride_minutes: int = 10) -> None:
+        """Answer searches from stops; every ride takes ride_minutes."""
         self.stops = stops
         self.ride_minutes = ride_minutes
         self.trip_messages: dict[str, list[str]] = {}
         self.rides: list[tuple[Any, Any, Any]] = []
 
     async def async_search(self, query: str, pos: Any) -> tuple[list[Stop], str, None]:
+        """Return the stop named query."""
         return [self.stops[query]], "dbf", None
 
     async def async_ride(self, start: Any, end: Any, lines: Any) -> dict[str, Any]:
+        """Record the ride and return its fixed duration."""
         self.rides.append((start, end, lines))
         return {"minutes": self.ride_minutes}
 
     async def async_trip(self, trip: Any) -> dict[str, Any]:
+        """Return a trip without stops, with the messages set for it."""
         return {"stops": [], "messages": self.trip_messages.get(trip.get("id"), [])}
 
 
 class FakeCoordinator:
-    def __init__(self, boards: dict[str, list[dict[str, Any]] | None], ride_minutes: int = 10) -> None:
+    """Stand-in for the coordinator, with a fixed board per stop."""
+
+    def __init__(
+        self, boards: dict[str, list[dict[str, Any]] | None], ride_minutes: int = 10
+    ) -> None:
+        """Make a stop per board name; None as a board means DBF is unreachable."""
         stops = {
-            name: Stop(name=name, eva=str(i), source="BVG", latitude=52.5, longitude=13.3)
+            name: Stop(
+                name=name, eva=str(i), source="BVG", latitude=52.5, longitude=13.3
+            )
             for i, name in enumerate(boards)
         }
         self.boards = {stops[name].eva: deps for name, deps in boards.items()}
         self.client = FakeService(stops, ride_minutes)
 
-    async def async_board(self, eva: str, source: str, linked: Any = None, **_: Any) -> Board:
+    async def async_board(
+        self, eva: str, source: str, linked: Any = None, **_: Any
+    ) -> Board:
+        """Return the stop's board, or an unreachable-DBF board for None."""
         if self.boards[eva] is None:
             # DBF unreachable, Transitous off or failing, nothing kept.
             return Board(error="Your DBF server isn't reachable", unreachable=True)
@@ -169,15 +187,22 @@ async def test_line_status_notices_are_short_and_not_repeated() -> None:
 
 
 class FakeStates:
+    """Stand-in for hass.states over a fixed list of states."""
+
     def __init__(self, states: list[State]) -> None:
+        """Index the states by entity id."""
         self._states = {state.entity_id: state for state in states}
 
     def get(self, entity_id: str) -> State | None:
+        """Return the state of entity_id, if any."""
         return self._states.get(entity_id)
 
 
 class FakeHass:
+    """Stand-in for hass with only its states."""
+
     def __init__(self, states: list[State]) -> None:
+        """Hold the given states."""
         self.states = FakeStates(states)
 
 
@@ -193,7 +218,9 @@ def _sensor_dep(line: str, minutes: int) -> dict[str, Any]:
     }
 
 
-def _sensor(entity_id: str, station: str, deps: list[dict[str, Any]], name: str) -> State:
+def _sensor(
+    entity_id: str, station: str, deps: list[dict[str, Any]], name: str
+) -> State:
     return State(
         entity_id,
         str(len(deps)),
@@ -202,11 +229,15 @@ def _sensor(entity_id: str, station: str, deps: list[dict[str, Any]], name: str)
 
 
 async def test_commute_ride_is_asked_like_the_card() -> None:
-    """The commute asks the ride with the card's start, end and lines, so a
-    ride the card got is found in last known while DBF is degraded."""
+    """The commute asks the ride with the card's start, end and lines, so a ride the card got is found in last known while DBF is degraded."""
     hass = FakeHass(
         [
-            _sensor("sensor.a", "900023201", [_sensor_dep("S5", 4), _sensor_dep("S7", 6)], "A sensor"),
+            _sensor(
+                "sensor.a",
+                "900023201",
+                [_sensor_dep("S5", 4), _sensor_dep("S7", 6)],
+                "A sensor",
+            ),
             _sensor("sensor.b", "900100003", [_sensor_dep("U2", 20)], "B sensor"),
         ]
     )
@@ -215,12 +246,16 @@ async def test_commute_ride_is_asked_like_the_card() -> None:
         name="Work",
         dashboard="overview",
         cards=[
-            {"type": assist.CONNECTION_CARD, "entity": "sensor.a", "ride_to": "sensor.b"},
+            {
+                "type": assist.CONNECTION_CARD,
+                "entity": "sensor.a",
+                "ride_to": "sensor.b",
+            },
             {"type": assist.CONNECTION_CARD, "entity": "sensor.b", "title": "Alex"},
         ],
         visibility=None,
     )
-    legs = assist._commute_legs(hass, coordinator, commute)
+    legs = assist._commute_legs(hass, coordinator, commute)  # noqa: SLF001
     result = await assist.plan(coordinator, legs, options=1)
     # What spdbf-connection-card's _updateRide sends for the first card:
     # its _stop() (no title: the stop id), the next card's _stop(next, ""),
@@ -234,9 +269,6 @@ async def test_commute_ride_is_asked_like_the_card() -> None:
 
 async def test_sensor_without_departures_keeps_its_network(hass) -> None:
     """A BVG db_infoscreen sensor with no departures (at night) stays BVG."""
-    from homeassistant.helpers import entity_registry as er
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
-
     registry = er.async_get(hass)
     for name, source in (
         ("bvg", "BVG – Berliner Verkehrsbetriebe"),
@@ -247,14 +279,24 @@ async def test_sensor_without_departures_keeps_its_network(hass) -> None:
         entry = MockConfigEntry(domain="db_infoscreen", data={"data_source": source})
         entry.add_to_hass(hass)
         registry.async_get_or_create(
-            "sensor", "db_infoscreen", name, config_entry=entry, suggested_object_id=name
+            "sensor",
+            "db_infoscreen",
+            name,
+            config_entry=entry,
+            suggested_object_id=name,
         )
     networks = {}
     for name in ("bvg", "legacy", "iris", "efa", "unregistered"):
-        state = State(f"sensor.{name}", "0", {"station": "900023201", "next_departures": []})
-        networks[name] = assist._sensor_stop(hass, state, "")["network"]
+        state = State(
+            f"sensor.{name}", "0", {"station": "900023201", "next_departures": []}
+        )
+        networks[name] = assist._sensor_stop(hass, state, "")["network"]  # noqa: SLF001
     assert networks == {
-        "bvg": "BVG", "legacy": "BVG", "iris": "DB", "efa": "DB", "unregistered": "DB"
+        "bvg": "BVG",
+        "legacy": "BVG",
+        "iris": "DB",
+        "efa": "DB",
+        "unregistered": "DB",
     }
 
 
@@ -262,7 +304,12 @@ async def test_commute_numbers_from_yaml_dont_crash() -> None:
     """walk_minutes / departures typed as "3.5" or text are read, not raised."""
     hass = FakeHass(
         [
-            _sensor("sensor.a", "900023201", [_sensor_dep("S5", i) for i in range(4, 12)], "A"),
+            _sensor(
+                "sensor.a",
+                "900023201",
+                [_sensor_dep("S5", i) for i in range(4, 12)],
+                "A",
+            ),
             _sensor("sensor.b", "900100003", [_sensor_dep("U2", 20)], "B"),
         ]
     )
@@ -270,21 +317,31 @@ async def test_commute_numbers_from_yaml_dont_crash() -> None:
     boards = assist.Commute(
         name="Boards",
         dashboard="overview",
-        cards=[{"type": assist.CONNECTION_CARD, "entity": "sensor.a", "departures": "3.5"}],
+        cards=[
+            {"type": assist.CONNECTION_CARD, "entity": "sensor.a", "departures": "3.5"}
+        ],
         visibility=None,
     )
-    result = await assist._commute_boards(hass, coordinator, boards, dt_util.now())
+    result = await assist._commute_boards(hass, coordinator, boards, dt_util.now())  # noqa: SLF001
     assert len(result[0]["departures"]) == 3
-    legs = assist._commute_legs(
+    legs = assist._commute_legs(  # noqa: SLF001
         hass,
         coordinator,
         assist.Commute(
             name="Work",
             dashboard="overview",
             cards=[
-                {"type": assist.CONNECTION_CARD, "entity": "sensor.a", "ride_to": "sensor.b",
-                 "walk_minutes": "2.5"},
-                {"type": assist.CONNECTION_CARD, "entity": "sensor.b", "walk_minutes": "soon"},
+                {
+                    "type": assist.CONNECTION_CARD,
+                    "entity": "sensor.a",
+                    "ride_to": "sensor.b",
+                    "walk_minutes": "2.5",
+                },
+                {
+                    "type": assist.CONNECTION_CARD,
+                    "entity": "sensor.b",
+                    "walk_minutes": "soon",
+                },
             ],
             visibility=None,
         ),
@@ -297,6 +354,7 @@ class NearbyDownCoordinator(FakeCoordinator):
     """DBF can't look stops up; Transitous has the nearest ones."""
 
     def __init__(self, error: Exception, degraded: bool = True) -> None:
+        """Fail stop lookups with error; Transitous has one stop."""
         super().__init__({})
         self.error = error
         self.client.degraded = degraded
@@ -310,13 +368,18 @@ class NearbyDownCoordinator(FakeCoordinator):
         )
 
     async def async_nearby(self, pos: Any) -> list[Stop]:
+        """Fail like the DBF stop lookup does."""
         raise self.error
 
     async def async_nearby_fallback(self, pos: Any) -> list[Stop]:
+        """Count the call and return the Transitous stop."""
         self.fallback_asked += 1
         return [self.transitous_stop]
 
-    async def async_board(self, eva: str, source: str, linked: Any = None, **_: Any) -> Board:
+    async def async_board(
+        self, eva: str, source: str, linked: Any = None, **_: Any
+    ) -> Board:
+        """Return the Transitous stop's board."""
         assert (eva, source) == (self.transitous_stop.eva, "Transitous")
         return Board(departures=[_dep("S5", 4)], origin="transitous")
 
@@ -325,8 +388,7 @@ HERE = assist.Place((52.5054, 13.3053), "Stefano")
 
 
 async def test_near_me_falls_back_to_transitous_while_dbf_is_down() -> None:
-    from custom_components.spdbf_nearby.dbf import ServerUnreachable
-
+    """Test that near-me departures come from Transitous while DBF is down."""
     coordinator = NearbyDownCoordinator(ServerUnreachable("down"))
     deps = await assist.departures(
         coordinator,
@@ -349,11 +411,9 @@ async def test_near_me_falls_back_to_transitous_while_dbf_is_down() -> None:
 
 async def test_dbf_refusal_is_not_an_outage() -> None:
     """A DBF error while DBF is fine (e.g. an unpatched server) isn't hidden."""
-    import pytest
-
-    from custom_components.spdbf_nearby.dbf import DbfError
-
-    coordinator = NearbyDownCoordinator(DbfError("Invalid lon/lat received"), degraded=False)
+    coordinator = NearbyDownCoordinator(
+        DbfError("Invalid lon/lat received"), degraded=False
+    )
     with pytest.raises(DbfError):
         await assist.nearby_stops(coordinator, HERE, count=5)
     assert coordinator.fallback_asked == 0

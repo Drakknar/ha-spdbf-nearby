@@ -11,8 +11,6 @@ Only in storage mode; in YAML mode resources are yours to manage. The
 resource is updated with each release and removed with the last entry.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 
@@ -31,7 +29,7 @@ RESOURCE_URL = f"{LOADER_PATH}?v={FRONTEND_VERSION}&via=resource"
 _LOCK_KEY = "spdbf_nearby_resource_lock"
 
 
-def _resources(hass: HomeAssistant):  # noqa: ANN202 - Home Assistant's collection
+def _resources(hass: HomeAssistant):
     data = hass.data.get(LOVELACE_DATA)
     if data is None or data.resource_mode != MODE_STORAGE:
         return None
@@ -46,10 +44,11 @@ async def async_register_resource(hass: HomeAssistant) -> None:
         await _async_register(resources)
 
 
-async def _async_register(resources) -> None:  # noqa: ANN001 - Home Assistant's collection
+async def _async_register(resources) -> None:
     await resources.async_get_info()  # loads the stored resources
     ours = [
-        item for item in resources.async_items()
+        item
+        for item in resources.async_items()
         if str(item.get("url", "")).split("?")[0] == LOADER_PATH
     ]
     if not ours:

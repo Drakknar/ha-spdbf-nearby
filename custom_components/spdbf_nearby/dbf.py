@@ -5,8 +5,6 @@ stop search card, the departure dialog and its trip view). What to show
 when DBF can't deliver (Transitous, last known data) is service.py's job.
 """
 
-from __future__ import annotations
-
 import asyncio
 from datetime import datetime, timedelta, tzinfo
 import logging
@@ -84,7 +82,9 @@ class DbfClient:
         # Links default to the server URL when no public URL is set.
         self._public = (config.get(CONF_PUBLIC_URL) or self.server).rstrip("/")
         self.sources: list[str] = config[CONF_SOURCES]
-        self.merge_networks = bool(config.get(CONF_MERGE_NETWORKS, DEFAULT_MERGE_NETWORKS))
+        self.merge_networks = bool(
+            config.get(CONF_MERGE_NETWORKS, DEFAULT_MERGE_NETWORKS)
+        )
         self._semaphore = asyncio.Semaphore(MAX_PARALLEL_REQUESTS)
         self._iris_tz: tzinfo | None = None
         self._coordinate_issue: bool | None = None
@@ -336,7 +336,10 @@ class DbfClient:
             # DB's IRIS feed is empty for some stations (e.g. Berlin
             # Zoologischer Garten). ÖBB's HAFAS knows DB station numbers and
             # fills the gap.
-            attempts = [(None, self._parse_iris), (DB_FALLBACK_HAFAS, self._parse_hafas)]
+            attempts = [
+                (None, self._parse_iris),
+                (DB_FALLBACK_HAFAS, self._parse_hafas),
+            ]
         else:
             attempts = [(source, self._parse_hafas)]
 
@@ -426,9 +429,13 @@ class DbfClient:
         """Return a trip's stops, from the trip reference of a departure."""
         if trip.get("id"):
             path = f"/z/{quote(trip['id'], safe='')}.json"
-            payload = await self.request_json("GET", path, params={"hafas": trip["hafas"]})
+            payload = await self.request_json(
+                "GET", path, params={"hafas": trip["hafas"]}
+            )
             return _hafas_trip(payload)
-        path = f"/z/{quote(trip['train'], safe='')}/{quote(trip['station'], safe='')}.json"
+        path = (
+            f"/z/{quote(trip['train'], safe='')}/{quote(trip['station'], safe='')}.json"
+        )
         return _iris_trip(await self.request_json("GET", path))
 
     async def async_ride(
@@ -443,14 +450,22 @@ class DbfClient:
         station is matched to its BVG stop with the DB + BVG rules. Needs
         tripId from the patched DBF image; without it, None.
         """
-        key = "ride:" + "|".join(
-            f"{station.get('eva')}/{station.get('name')}" for station in (start, end)
-        ) + "|" + ",".join(lines or [])
+        key = (
+            "ride:"
+            + "|".join(
+                f"{station.get('eva')}/{station.get('name')}"
+                for station in (start, end)
+            )
+            + "|"
+            + ",".join(lines or [])
+        )
         now = dt_util.utcnow()
         if (cached := self._rides.get(key)) and now - cached[0] < RIDE_CACHE_TTL:
             return cached[1]
         ride = await self._find_ride(start, end, lines or [])
-        self._rides = {k: v for k, v in self._rides.items() if now - v[0] < RIDE_CACHE_TTL}
+        self._rides = {
+            k: v for k, v in self._rides.items() if now - v[0] < RIDE_CACHE_TTL
+        }
         self._rides[key] = (now, ride)
         return ride
 
@@ -539,7 +554,11 @@ def _ride_on(
         return None
     stops = data["stops"]
     first = next(
-        (i for i, stop in enumerate(stops) if stop.get("current") or _same_station(stop, start)),
+        (
+            i
+            for i, stop in enumerate(stops)
+            if stop.get("current") or _same_station(stop, start)
+        ),
         None,
     )
     if first is None:
@@ -564,7 +583,11 @@ def _ride_on(
 
 
 def _same_station(stop: dict[str, Any], station: dict[str, str]) -> bool:
-    if station.get("eva") and stop.get("eva") and str(stop["eva"]) == str(station["eva"]):
+    if (
+        station.get("eva")
+        and stop.get("eva")
+        and str(stop["eva"]) == str(station["eva"])
+    ):
         return True
     a, b = stop.get("name"), station.get("name")
     if not (a and b):
@@ -579,9 +602,7 @@ def _same_station(stop: dict[str, Any], station: dict[str, str]) -> bool:
 
 
 def _ride_minutes(leave_at: Any, arrive_at: Any, leave: int, arrive: int) -> int:
-    """Minutes from leave to arrive. HAFAS times carry their UTC offset, so
-    a ride across the DST change (02:50 CEST to 02:05 CET) is 15 minutes,
-    not 23 hours; clock times alone only wrap past midnight."""
+    """Minutes from leave to arrive. HAFAS times carry their UTC offset, so a ride across the DST change (02:50 CEST to 02:05 CET) is 15 minutes, not 23 hours; clock times alone only wrap past midnight."""
     start = dt_util.parse_datetime(str(leave_at)) if len(str(leave_at)) >= 16 else None
     end = dt_util.parse_datetime(str(arrive_at)) if len(str(arrive_at)) >= 16 else None
     if start is not None and end is not None and start.tzinfo and end.tzinfo:
@@ -617,21 +638,29 @@ def _hafas_trip(payload: Any) -> dict[str, Any]:
     stops = []
     for stop in journey.get("route") or []:
         loc = stop.get("loc") or {}
-        stops.append({
-            "name": loc.get("name"),
-            "eva": str(loc["eva"]) if loc.get("eva") is not None else None,
-            "arrival": _iso(stop.get("sched_arr")),
-            "departure": _iso(stop.get("sched_dep")),
-            "arrival_delay": stop.get("arr_delay"),
-            "departure_delay": stop.get("dep_delay"),
-            "platform": stop.get("rt_platform") or stop.get("platform")
-            or stop.get("sched_platform"),
-            "cancelled": bool(stop.get("arr_cancelled") or stop.get("dep_cancelled")),
-        })
-    messages = list(dict.fromkeys(
-        msg["text"] for msg in journey.get("messages") or []
-        if msg.get("is_him") and msg.get("text")
-    ))
+        stops.append(
+            {
+                "name": loc.get("name"),
+                "eva": str(loc["eva"]) if loc.get("eva") is not None else None,
+                "arrival": _iso(stop.get("sched_arr")),
+                "departure": _iso(stop.get("sched_dep")),
+                "arrival_delay": stop.get("arr_delay"),
+                "departure_delay": stop.get("dep_delay"),
+                "platform": stop.get("rt_platform")
+                or stop.get("platform")
+                or stop.get("sched_platform"),
+                "cancelled": bool(
+                    stop.get("arr_cancelled") or stop.get("dep_cancelled")
+                ),
+            }
+        )
+    messages = list(
+        dict.fromkeys(
+            msg["text"]
+            for msg in journey.get("messages") or []
+            if msg.get("is_him") and msg.get("text")
+        )
+    )
     return {
         "line": tidy_line(journey.get("line") or journey.get("name")),
         "direction": journey.get("direction"),
@@ -657,7 +686,10 @@ def _iris_trip(payload: Any) -> dict[str, Any]:
             str(payload.get("error")) if isinstance(payload, dict) else "No trip found"
         )
     pre, post = list(dep.get("route_pre") or []), list(dep.get("route_post") or [])
-    pre_diff, post_diff = dep.get("route_pre_diff") or [], dep.get("route_post_diff") or []
+    pre_diff, post_diff = (
+        dep.get("route_pre_diff") or [],
+        dep.get("route_post_diff") or [],
+    )
 
     def names(stops: list[Any]) -> list[str]:
         return [s.get("name") if isinstance(s, dict) else s for s in stops]
@@ -705,8 +737,10 @@ def _iris_trip(payload: Any) -> dict[str, Any]:
     stops.append(here)
     stops.extend(stop_of(s) for s in (post_diff if timed else post))
     return {
-        "line": tidy_line(f"{dep.get('train_type') or ''} {dep.get('train_line') or ''}",
-                          dep.get("train_no")),
+        "line": tidy_line(
+            f"{dep.get('train_type') or ''} {dep.get('train_line') or ''}",
+            dep.get("train_no"),
+        ),
         "direction": dep.get("destination"),
         "stops": stops,
         "times": timed,
