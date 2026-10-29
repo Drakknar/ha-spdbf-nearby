@@ -21,7 +21,7 @@ Everything that comes from upstream (code, comments, commit messages, release no
 2. Find what changed in those areas between the two versions.
    - **Home Assistant**, all of these:
      - The developer blog (https://developers.home-assistant.io/blog), posts between the two releases. Deprecations and breaking changes for custom integrations are announced there.
-     - The release notes: https://www.home-assistant.io/blog/categories/release-notes/, or https://rc.home-assistant.io/blog/ for a beta. Read "Backward-incompatible changes".
+     - The release notes: https://www.home-assistant.io/blog/categories/release-notes/. Read "Backward-incompatible changes".
      - The source diff of the modules this repository uses. Clone with `git clone --filter=blob:none https://github.com/home-assistant/core "$RUNNER_TEMP/core"`, then `git diff <old> <new> -- <paths>`.
      - Deprecations due in this version or the next few. Search the new source for `breaks_in_ha_version`, `report_usage` and `deprecated` near the APIs used here.
    - **Other dependencies:** their release notes and the source diff of the parts this repository talks to.

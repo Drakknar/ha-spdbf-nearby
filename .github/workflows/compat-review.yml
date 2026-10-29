@@ -53,25 +53,25 @@ jobs:
           keys=()
           subjects=()
 
-          # Home Assistant: one review per minor release, starting with its first
-          # beta, so a breaking change shows up before the release reaches you.
+          # Home Assistant: one review per minor release, at its newest stable
+          # release. Betas are not reviewed (the owner's choice, 2026-10-30).
           tags=$(gh api "repos/home-assistant/core/releases?per_page=50" --jq '.[].tag_name' \
-            | grep -E '^[0-9]{4}\.[0-9]+\.[0-9]+(b[0-9]+)?$')
-          minor=$(sort -V <<<"$tags" | tail -n1 | cut -d. -f1,2)
-          tag=$(grep "^$minor\." <<<"$tags" | grep -v b | sort -V | tail -n1 || true)
-          [ -n "$tag" ] || tag=$(grep "^$minor\." <<<"$tags" | sort -V | tail -n1)
-          if due "ha:$minor"; then
+            | grep -E '^[0-9]{4}\.[0-9]+\.[0-9]+$')
+          tag=$(sort -V <<<"$tags" | tail -n1)
+          minor=${tag%.*}
+          # Before that, a minor was reviewed at its first beta (ha:last is then
+          # that beta), so its stable release still gets a review of its own.
+          last=$(w get ha:last)
+          if due "ha:$minor" || [[ $last == "$minor".*b* ]]; then
             # A repeat (force) covers the same range as the first review.
             prev=$(w get "ha:from:$minor")
-            [ -n "$prev" ] || prev=$(w get ha:last)
+            [ -n "$prev" ] || prev=$last
             prev=${prev:-$(jq -r .homeassistant hacs.json)}
             keys+=("ha:$minor=@" "ha:from:$minor=$prev" "ha:last=$tag")
             subjects+=("Home Assistant $tag")
-            beta=""
-            case "$tag" in *b*) beta=" This is a beta; the final release follows about a week later." ;; esac
             cat >> "$ctx" <<CTX
           ## Home Assistant core
-          - Last reviewed: $prev. New: $tag.$beta
+          - Last reviewed: $prev. New: $tag.
           - Source: https://github.com/home-assistant/core/compare/$prev...$tag
           - Frontend version each release ships: homeassistant/components/frontend/manifest.json at that tag.
 
