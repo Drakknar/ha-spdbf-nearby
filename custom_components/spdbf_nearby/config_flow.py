@@ -3,7 +3,7 @@
 from typing import Any
 
 import aiohttp
-import voluptuous as vol
+import probatio
 
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -62,34 +62,36 @@ from .const import (
 _PROBE = {"lat": "52.5251", "lon": "13.3694"}
 
 
-def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
+def _schema(hass: HomeAssistant, values: dict[str, Any]) -> probatio.Schema:
     tracked = values.get(CONF_TRACKED_ENTITY) or next(
         iter(hass.states.async_entity_ids("person")), None
     )
     url = TextSelector(TextSelectorConfig(type=TextSelectorType.URL))
     server = values.get(CONF_SERVER_URL)
     public = values.get(CONF_PUBLIC_URL)
-    return vol.Schema(
+    return probatio.Schema(
         {
             (
-                vol.Required(CONF_SERVER_URL, default=server)
+                probatio.Required(CONF_SERVER_URL, default=server)
                 if server
-                else vol.Required(CONF_SERVER_URL)
+                else probatio.Required(CONF_SERVER_URL)
             ): url,
             # Suggested, not a default: a default would come back when the
             # field is cleared, so the public URL could never be removed.
-            vol.Optional(CONF_PUBLIC_URL, description={"suggested_value": public}): url,
+            probatio.Optional(
+                CONF_PUBLIC_URL, description={"suggested_value": public}
+            ): url,
             (
-                vol.Required(CONF_TRACKED_ENTITY, default=tracked)
+                probatio.Required(CONF_TRACKED_ENTITY, default=tracked)
                 if tracked
-                else vol.Required(CONF_TRACKED_ENTITY)
+                else probatio.Required(CONF_TRACKED_ENTITY)
             ): EntitySelector(
                 EntitySelectorConfig(domain=["person", "device_tracker"])
             ),
-            vol.Required(
+            probatio.Required(
                 CONF_MAP_STOPS, default=values.get(CONF_MAP_STOPS, DEFAULT_MAP_STOPS)
             ): BooleanSelector(),
-            vol.Required(
+            probatio.Required(
                 CONF_SOURCES, default=values.get(CONF_SOURCES, DEFAULT_SOURCES)
             ): SelectSelector(
                 SelectSelectorConfig(
@@ -99,7 +101,7 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
                     mode=SelectSelectorMode.DROPDOWN,
                 )
             ),
-            vol.Required(
+            probatio.Required(
                 CONF_RADIUS, default=values.get(CONF_RADIUS, DEFAULT_RADIUS)
             ): NumberSelector(
                 NumberSelectorConfig(
@@ -110,28 +112,28 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
                     mode=NumberSelectorMode.SLIDER,
                 )
             ),
-            vol.Required(
+            probatio.Required(
                 CONF_MAX_STOPS, default=values.get(CONF_MAX_STOPS, DEFAULT_MAX_STOPS)
             ): NumberSelector(
                 NumberSelectorConfig(min=1, max=30, step=1, mode=NumberSelectorMode.BOX)
             ),
-            vol.Required(
+            probatio.Required(
                 CONF_DEPARTURES, default=values.get(CONF_DEPARTURES, DEFAULT_DEPARTURES)
             ): NumberSelector(
                 NumberSelectorConfig(min=0, max=10, step=1, mode=NumberSelectorMode.BOX)
             ),
-            vol.Required(
+            probatio.Required(
                 CONF_MERGE_DUPLICATES,
                 default=values.get(CONF_MERGE_DUPLICATES, DEFAULT_MERGE_DUPLICATES),
             ): BooleanSelector(),
-            vol.Required(
+            probatio.Required(
                 CONF_MERGE_NETWORKS,
                 default=values.get(CONF_MERGE_NETWORKS, DEFAULT_MERGE_NETWORKS),
             ): BooleanSelector(),
-            vol.Required(
+            probatio.Required(
                 CONF_FALLBACK, default=values.get(CONF_FALLBACK, DEFAULT_FALLBACK)
             ): BooleanSelector(),
-            vol.Required(
+            probatio.Required(
                 CONF_PROBLEM_AFTER,
                 default=values.get(CONF_PROBLEM_AFTER, DEFAULT_PROBLEM_AFTER),
             ): NumberSelector(
@@ -143,7 +145,7 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
                     mode=NumberSelectorMode.BOX,
                 )
             ),
-            vol.Required(
+            probatio.Required(
                 CONF_SCAN_INTERVAL,
                 default=values.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
             ): NumberSelector(
