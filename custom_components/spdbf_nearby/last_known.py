@@ -5,8 +5,6 @@ storage so they survive a restart, and shown marked with their age. Old and
 surplus entries are dropped.
 """
 
-from __future__ import annotations
-
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -65,12 +63,16 @@ class LastKnown:
         return when, entry["value"]
 
 
-def refresh_departures(departures: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
+def refresh_departures(
+    departures: list[dict[str, Any]], now: datetime
+) -> list[dict[str, Any]]:
     """Return kept departures with minutes counted from now; gone ones dropped."""
     fresh = []
     for dep in departures:
         expected = dt_util.parse_datetime(dep.get("expected") or "")
         if expected is None or expected < now - timedelta(minutes=1):
             continue
-        fresh.append({**dep, "minutes": max(0, int((expected - now).total_seconds() // 60))})
+        fresh.append(
+            {**dep, "minutes": max(0, int((expected - now).total_seconds() // 60))}
+        )
     return fresh

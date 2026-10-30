@@ -6,8 +6,6 @@ DBF covers them), so a network only counts as down for real once its checks
 have failed for problem_after; one working check ends that.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from datetime import datetime, timedelta
 import logging
@@ -59,7 +57,10 @@ class DbfStatus:
     @property
     def reason(self) -> str | None:
         """Return why the checks fail, per network."""
-        return "; ".join(f"{net}: {why}" for net, (_, why) in self._failing.items()) or None
+        return (
+            "; ".join(f"{net}: {why}" for net, (_, why) in self._failing.items())
+            or None
+        )
 
     @callback
     def async_add_listener(self, listener: CALLBACK_TYPE) -> Callable[[], None]:
@@ -142,7 +143,9 @@ class DbfStatus:
                 for net, (when, why) in self._failing.items()
             },
             "last_check": (
-                dt_util.as_local(self.last_check).isoformat() if self.last_check else None
+                dt_util.as_local(self.last_check).isoformat()
+                if self.last_check
+                else None
             ),
             "fallback": "Transitous" if self._fallback else None,
         }

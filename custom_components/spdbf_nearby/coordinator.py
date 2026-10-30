@@ -5,8 +5,6 @@ module follows the person and keeps the nearby stops up to date. With the
 map turned off it does no polling, and only answers "nearby" requests.
 """
 
-from __future__ import annotations
-
 import asyncio
 from datetime import datetime, timedelta
 import logging
@@ -118,7 +116,9 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
         doesn't depend on where you are; else the nearest map stop.
         """
         stations = {s: STATUS_STATIONS[s] for s in self.sources if s in STATUS_STATIONS}
-        nearest = sorted(self._stops.values(), key=lambda stop: self.distance_m(stop) or 0)
+        nearest = sorted(
+            self._stops.values(), key=lambda stop: self.distance_m(stop) or 0
+        )
         for stop in nearest:
             for member in (stop, *stop.linked):
                 stations.setdefault(member.source, member.eva)
@@ -194,18 +194,25 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
                 self._lookup_time = dt_util.utcnow()
 
         if self._departures and not fresh:
-            stops = sorted(self._stops.values(), key=lambda stop: self.distance_m(stop) or 0)
+            stops = sorted(
+                self._stops.values(), key=lambda stop: self.distance_m(stop) or 0
+            )
             # While DBF struggles, only the nearest stops ask Transitous (a
             # community service); the others show their last known boards.
             live = FALLBACK_STOPS if self.client.degraded else len(stops)
             await asyncio.gather(
-                *(self._update_departures(stop, live=i < live) for i, stop in enumerate(stops))
+                *(
+                    self._update_departures(stop, live=i < live)
+                    for i, stop in enumerate(stops)
+                )
             )
         return dict(self._stops)
 
     async def _fetch_stops(self, pos: Position) -> list[Stop]:
         """Return the stops within the radius, nearest first."""
-        stops = await self.client.fetch_candidates({"lat": str(pos[0]), "lon": str(pos[1])})
+        stops = await self.client.fetch_candidates(
+            {"lat": str(pos[0]), "lon": str(pos[1])}
+        )
         in_range = []
         for stop in stops:
             if previous := self._stops.get(stop.key):
@@ -225,7 +232,9 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
         """
         # Boards from Transitous or last known data are no reliable guide to
         # merging, and fetching every candidate would bypass FALLBACK_STOPS.
-        merge_boards = self._merge and bool(self._departures) and not self.client.degraded
+        merge_boards = (
+            self._merge and bool(self._departures) and not self.client.degraded
+        )
         if not (merge_boards or self.client.merge_networks):
             return {stop.key: stop for stop in candidates[: self._max_stops]}, False
 
@@ -283,8 +292,7 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
         return stops[: self._max_stops]
 
     async def async_nearby_fallback(self, pos: Position) -> list[Stop]:
-        """Return the nearest stops from Transitous within the radius (Assist,
-        while DBF can't look stops up; the map and cards don't use it)."""
+        """Return the nearest stops from Transitous within the radius (Assist, while DBF can't look stops up; the map and cards don't use it)."""
         return await self.client.async_nearby_fallback(pos, self._radius_m)
 
     async def async_board(
@@ -296,12 +304,13 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
         name: str | None = None,
         pos: Position | None = None,
     ) -> Board:
-        """Return a stop's full board; a map stop brings its linked stations,
-        name and position (for finding it on Transitous)."""
+        """Return a stop's full board; a map stop brings its linked stations, name and position (for finding it on Transitous)."""
         if stop := self._stops.get(f"{source}_{eva}"):
             if linked is None:
                 linked = [(s.eva, s.source) for s in stop.linked]
             # A map stop's own name and position beat a card's title.
             name = stop.name
             pos = (stop.latitude, stop.longitude)
-        return await self.client.async_board(eva, source, linked or [], name=name, pos=pos)
+        return await self.client.async_board(
+            eva, source, linked or [], name=name, pos=pos
+        )

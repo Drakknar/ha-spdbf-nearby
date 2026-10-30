@@ -1,7 +1,5 @@
 """WebSocket commands for the stop search card and the departure dialog."""
 
-from __future__ import annotations
-
 from collections.abc import Awaitable
 from typing import Any
 
@@ -52,7 +50,9 @@ def _coordinator(
                 f"{retrying[0].reason or 'DBF server unreachable'}",
             )
         else:
-            connection.send_error(msg["id"], "not_found", "spdbf Public Transport is not set up")
+            connection.send_error(
+                msg["id"], "not_found", "spdbf Public Transport is not set up"
+            )
         return None
     user_id = connection.user.id if connection.user else None
     for entry in entries:
@@ -67,7 +67,9 @@ def _error_code(err: DbfError) -> str:
 
 
 async def _reply(
-    connection: websocket_api.ActiveConnection, msg: dict[str, Any], call: Awaitable[Any]
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+    call: Awaitable[Any],
 ) -> None:
     """Send the call's result, or DBF's error."""
     try:
@@ -192,7 +194,9 @@ async def ws_board(
     linked = msg.get("linked")
     networks = {msg["network"], *(item["network"] for item in linked or [])}
     # Transitous stops come from the stop search while DBF can't deliver.
-    if _bad_networks(coordinator, connection, msg, networks, frozenset({SOURCE_TRANSITOUS})):
+    if _bad_networks(
+        coordinator, connection, msg, networks, frozenset({SOURCE_TRANSITOUS})
+    ):
         return
     board = await coordinator.async_board(
         msg["eva"],
@@ -260,8 +264,12 @@ async def ws_ride(
     if (coordinator := _coordinator(hass, connection, msg)) is None:
         return
     start = msg["from"]
-    if start.get("network") and _bad_networks(coordinator, connection, msg, {start["network"]}):
+    if start.get("network") and _bad_networks(
+        coordinator, connection, msg, {start["network"]}
+    ):
         return
     await _reply(
-        connection, msg, coordinator.client.async_ride(start, msg["to"], msg.get("lines"))
+        connection,
+        msg,
+        coordinator.client.async_ride(start, msg["to"], msg.get("lines")),
     )

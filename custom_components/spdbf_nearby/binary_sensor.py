@@ -1,7 +1,5 @@
 """DBF problem sensor: on while DBF has been down for real (status.py)."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from homeassistant.components.binary_sensor import (
@@ -23,7 +21,9 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Add the DBF problem sensor."""
-    async_add_entities([DbfProblemSensor(entry.entry_id, entry.runtime_data.client.status)])
+    async_add_entities(
+        [DbfProblemSensor(entry.entry_id, entry.runtime_data.client.status)]
+    )
 
 
 class DbfProblemSensor(BinarySensorEntity):
@@ -40,7 +40,9 @@ class DbfProblemSensor(BinarySensorEntity):
     _attr_translation_key = "dbf_problem"
     _attr_icon = "mdi:train-variant"
     # Every check rewrites last_check; history needs only the on/off state.
-    _unrecorded_attributes = frozenset({"failing", "last_check", "fallback", "spdbf_status"})
+    _unrecorded_attributes = frozenset(
+        {"failing", "last_check", "fallback", "spdbf_status"}
+    )
 
     def __init__(self, entry_id: str, status: DbfStatus) -> None:
         """Initialize the sensor."""

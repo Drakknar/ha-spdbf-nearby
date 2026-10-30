@@ -1,7 +1,5 @@
 """Config flow for spdbf Public Transport."""
 
-from __future__ import annotations
-
 from typing import Any
 
 import aiohttp
@@ -85,7 +83,9 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
                 vol.Required(CONF_TRACKED_ENTITY, default=tracked)
                 if tracked
                 else vol.Required(CONF_TRACKED_ENTITY)
-            ): EntitySelector(EntitySelectorConfig(domain=["person", "device_tracker"])),
+            ): EntitySelector(
+                EntitySelectorConfig(domain=["person", "device_tracker"])
+            ),
             vol.Required(
                 CONF_MAP_STOPS, default=values.get(CONF_MAP_STOPS, DEFAULT_MAP_STOPS)
             ): BooleanSelector(),
@@ -103,7 +103,10 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
                 CONF_RADIUS, default=values.get(CONF_RADIUS, DEFAULT_RADIUS)
             ): NumberSelector(
                 NumberSelectorConfig(
-                    min=0.2, max=5, step=0.1, unit_of_measurement="km",
+                    min=0.2,
+                    max=5,
+                    step=0.1,
+                    unit_of_measurement="km",
                     mode=NumberSelectorMode.SLIDER,
                 )
             ),
@@ -133,7 +136,10 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
                 default=values.get(CONF_PROBLEM_AFTER, DEFAULT_PROBLEM_AFTER),
             ): NumberSelector(
                 NumberSelectorConfig(
-                    min=1, max=120, step=1, unit_of_measurement="min",
+                    min=1,
+                    max=120,
+                    step=1,
+                    unit_of_measurement="min",
                     mode=NumberSelectorMode.BOX,
                 )
             ),
@@ -142,7 +148,10 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
                 default=values.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
             ): NumberSelector(
                 NumberSelectorConfig(
-                    min=30, max=600, step=10, unit_of_measurement="s",
+                    min=30,
+                    max=600,
+                    step=10,
+                    unit_of_measurement="s",
                     mode=NumberSelectorMode.BOX,
                 )
             ),
@@ -151,9 +160,11 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> vol.Schema:
 
 
 def _with_public_url(user_input: dict[str, Any]) -> dict[str, Any]:
-    """Store the public URL also when cleared: empty means the server URL
-    (an omitted key would let setup's value show through the options)."""
-    return {**user_input, CONF_PUBLIC_URL: str(user_input.get(CONF_PUBLIC_URL) or "").strip()}
+    """Store the public URL also when cleared: empty means the server URL (an omitted key would let setup's value show through the options)."""
+    return {
+        **user_input,
+        CONF_PUBLIC_URL: str(user_input.get(CONF_PUBLIC_URL) or "").strip(),
+    }
 
 
 async def _validate(hass: HomeAssistant, user_input: dict[str, Any]) -> dict[str, str]:
@@ -168,7 +179,7 @@ async def _validate(hass: HomeAssistant, user_input: dict[str, Any]) -> dict[str
         ) as resp:
             resp.raise_for_status()
             payload = await resp.json(content_type=None)
-    except (aiohttp.ClientError, TimeoutError, ValueError):
+    except aiohttp.ClientError, TimeoutError, ValueError:
         return {CONF_SERVER_URL: "cannot_connect"}
     if "candidates" not in payload:
         return {CONF_SERVER_URL: "not_dbf"}
@@ -221,9 +232,10 @@ class SpdbfOptionsFlow(OptionsFlow):
         errors: dict[str, str] = {}
         if user_input is not None:
             errors = await _validate(self.hass, user_input)
-            current_server = {**self.config_entry.data, **self.config_entry.options}.get(
-                CONF_SERVER_URL
-            )
+            current_server = {
+                **self.config_entry.data,
+                **self.config_entry.options,
+            }.get(CONF_SERVER_URL)
             # Your server may be down right now, which is when you'd want to
             # change the fallback. Only a new server URL must answer.
             if (

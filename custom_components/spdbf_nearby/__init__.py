@@ -1,5 +1,4 @@
-"""Public transport from your DBF (spdbf) server: stops near you on the map,
-a stop search card, departure boards and trips.
+"""Public transport from your DBF (spdbf) server: stops near you on the map, a stop search card, departure boards and trips.
 
 dbf.py talks to DBF, transitous.py to the fallback, service.py decides which
 answers, stations.py holds the station rules, status.py tracks whether DBF
@@ -7,8 +6,6 @@ delivers, www/dbf-core.js is the shared frontend (line colours, departure
 dialog, trip view). The map feature (coordinator.py, geo_location.py) can be
 turned off per entry.
 """
-
-from __future__ import annotations
 
 from datetime import datetime
 import logging
@@ -24,13 +21,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.typing import ConfigType
 
 from . import websocket_api
-from .const import (
-    CONF_FALLBACK,
-    DOMAIN,
-    FRONTEND_VERSION,
-    STATIC_URL,
-    STATUS_INTERVAL,
-)
+from .const import CONF_FALLBACK, DOMAIN, FRONTEND_VERSION, STATIC_URL, STATUS_INTERVAL
 from .coordinator import SpdbfCoordinator
 from .frontend import async_register_resource, async_unregister_resource
 from .last_known import LastKnown
@@ -83,7 +74,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: SpdbfConfigEntry) -> boo
     await hass.config_entries.async_forward_entry_setups(entry, _platforms(coordinator))
     try:
         await async_register_resource(hass)
-    except Exception:  # noqa: BLE001 - the extra module still loads the cards
+    except Exception:
         _LOGGER.exception("Couldn't add the cards as a dashboard resource")
     return True
 
@@ -98,7 +89,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: SpdbfConfigEntry) -> bo
 async def async_remove_entry(hass: HomeAssistant, entry: SpdbfConfigEntry) -> None:
     """Delete the entry's saved answers; with the last entry, the resource."""
     await LastKnown(hass, entry.entry_id).async_remove()
-    others = [e for e in hass.config_entries.async_entries(DOMAIN) if e.entry_id != entry.entry_id]
+    others = [
+        e
+        for e in hass.config_entries.async_entries(DOMAIN)
+        if e.entry_id != entry.entry_id
+    ]
     if not others:
         await async_unregister_resource(hass)
 

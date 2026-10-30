@@ -1,7 +1,5 @@
 """Nearby stops as geo_location entities, shown on the HA map."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from homeassistant.components.geo_location import GeolocationEvent
@@ -34,7 +32,11 @@ async def async_setup_entry(
         stops = coordinator.data or {}
         for key in [key for key in entities if key not in stops]:
             hass.async_create_task(entities.pop(key).async_remove())
-        new = [SpdbfStop(coordinator, stop) for key, stop in stops.items() if key not in entities]
+        new = [
+            SpdbfStop(coordinator, stop)
+            for key, stop in stops.items()
+            if key not in entities
+        ]
         entities.update((entity.stop_key, entity) for entity in new)
         if new:
             async_add_entities(new)

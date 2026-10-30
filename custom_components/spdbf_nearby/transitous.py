@@ -7,8 +7,6 @@ only asked when DBF fails. Answers are turned into the same departure, trip
 and stop shapes the rest of the integration uses.
 """
 
-from __future__ import annotations
-
 from datetime import datetime, timedelta
 import logging
 import re
@@ -78,17 +76,22 @@ class TransitousClient:
         return _stops(await self._get("v1/geocode", params))
 
     async def async_nearby(self, pos: Position) -> list[Stop]:
-        """Return the stops closest to a position (Transitous's default 5),
-        briefly cached per ~100 m."""
+        """Return the stops closest to a position (Transitous's default 5), briefly cached per ~100 m."""
         now = dt_util.utcnow()
         key = (round(pos[0], 3), round(pos[1], 3))
-        if (cached := self._nearby.get(key)) and now - cached[0] < TRANSITOUS_NEARBY_CACHE_TTL:
+        if (cached := self._nearby.get(key)) and now - cached[
+            0
+        ] < TRANSITOUS_NEARBY_CACHE_TTL:
             return cached[1]
         stops = _stops(
-            await self._get("v1/reverse-geocode", {"place": f"{pos[0]},{pos[1]}", "type": "STOP"})
+            await self._get(
+                "v1/reverse-geocode", {"place": f"{pos[0]},{pos[1]}", "type": "STOP"}
+            )
         )
         self._nearby = {
-            k: v for k, v in self._nearby.items() if now - v[0] < TRANSITOUS_NEARBY_CACHE_TTL
+            k: v
+            for k, v in self._nearby.items()
+            if now - v[0] < TRANSITOUS_NEARBY_CACHE_TTL
         }
         self._nearby[key] = (now, stops)
         return stops
@@ -126,7 +129,9 @@ class TransitousClient:
         """Return a stop's next departures, briefly cached."""
         now = dt_util.utcnow()
         key = (stop_id, rows)
-        if (cached := self._boards.get(key)) and now - cached[0] < TRANSITOUS_BOARD_CACHE_TTL:
+        if (cached := self._boards.get(key)) and now - cached[
+            0
+        ] < TRANSITOUS_BOARD_CACHE_TTL:
             return cached[1]
         payload = await self._get(
             "v6/stoptimes",
@@ -142,7 +147,9 @@ class TransitousClient:
         ]
         departures.sort(key=lambda dep: dep["minutes"])
         self._boards = {
-            k: v for k, v in self._boards.items() if now - v[0] < TRANSITOUS_BOARD_CACHE_TTL
+            k: v
+            for k, v in self._boards.items()
+            if now - v[0] < TRANSITOUS_BOARD_CACHE_TTL
         }
         self._boards[key] = (now, departures)
         return departures
@@ -156,26 +163,35 @@ class TransitousClient:
         if not legs:
             raise TransitousError("No trip found")
         leg = legs[0]
-        places = [leg.get("from") or {}, *(leg.get("intermediateStops") or []), leg.get("to") or {}]
-        stops = []
-        for place in places:
-            stops.append({
+        places = [
+            leg.get("from") or {},
+            *(leg.get("intermediateStops") or []),
+            leg.get("to") or {},
+        ]
+        stops = [
+            {
                 "name": place.get("name"),
                 "eva": place.get("stopId"),
                 "arrival": _local_iso(place.get("scheduledArrival")),
                 "departure": _local_iso(place.get("scheduledDeparture")),
-                "arrival_delay": _delay(place.get("scheduledArrival"), place.get("arrival")),
+                "arrival_delay": _delay(
+                    place.get("scheduledArrival"), place.get("arrival")
+                ),
                 "departure_delay": _delay(
                     place.get("scheduledDeparture"), place.get("departure")
                 ),
                 "platform": place.get("track") or place.get("scheduledTrack"),
                 "cancelled": bool(place.get("cancelled")),
-            })
-        messages = list(dict.fromkeys(
-            alert.get("headerText") or alert.get("descriptionText")
-            for alert in leg.get("alerts") or []
-            if alert.get("headerText") or alert.get("descriptionText")
-        ))
+            }
+            for place in places
+        ]
+        messages = list(
+            dict.fromkeys(
+                alert.get("headerText") or alert.get("descriptionText")
+                for alert in leg.get("alerts") or []
+                if alert.get("headerText") or alert.get("descriptionText")
+            )
+        )
         return {
             "line": tidy_line(leg.get("routeShortName") or leg.get("displayName")),
             "direction": leg.get("headsign"),
@@ -217,7 +233,9 @@ def _pick_stop(
     # Never the first result just because it came first: geocoding is
     # Europe-wide, and "Schönhauser Allee" also finds "Schönhauser Damm".
     names = station_names(name, drop_city=network == SOURCE_DB)
-    named = [stop for stop in stops if station_names(stop.name, drop_city=False) & names]
+    named = [
+        stop for stop in stops if station_names(stop.name, drop_city=False) & names
+    ]
     if pos is None:
         return named[0].eva if named else None
     near = []

@@ -11,8 +11,6 @@ its departures come from.
 satellite), else the asking user's person, else the entry's tracked entity.
 """
 
-from __future__ import annotations
-
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -62,7 +60,11 @@ def coordinator_for(hass: HomeAssistant, user_id: str | None) -> SpdbfCoordinato
         raise AssistError("spdbf Public Transport isn't set up or not ready yet")
     for entry in entries:
         tracked = hass.states.get(entry.runtime_data.tracked)
-        if user_id and tracked is not None and tracked.attributes.get("user_id") == user_id:
+        if (
+            user_id
+            and tracked is not None
+            and tracked.attributes.get("user_id") == user_id
+        ):
             return entry.runtime_data
     return entries[0].runtime_data
 
@@ -84,7 +86,11 @@ def _person_of_user(hass: HomeAssistant, user_id: str | None) -> State | None:
     if not user_id:
         return None
     return next(
-        (s for s in hass.states.async_all("person") if s.attributes.get("user_id") == user_id),
+        (
+            s
+            for s in hass.states.async_all("person")
+            if s.attributes.get("user_id") == user_id
+        ),
         None,
     )
 
@@ -140,7 +146,9 @@ def locate(
             if entry.domain == "device_tracker"
         ]
         for entity_id in trackers:
-            if (state := hass.states.get(entity_id)) and (pos := _state_position(state)):
+            if (state := hass.states.get(entity_id)) and (
+                pos := _state_position(state)
+            ):
                 return Place(pos, f"{state.name} (the asking phone)")
         if not trackers and (home := hass.states.get("zone.home")):
             return Place(_state_position(home), "home (asked from a device at home)")
@@ -203,8 +211,7 @@ def _hhmm(value: Any) -> str:
 
 
 def _sensor_row(dep: dict[str, Any], stop: dict[str, str]) -> Row:
-    """A db_infoscreen row; IRIS rows have scheduledDeparture, HAFAS rows
-    scheduledTime (as the connection card reads them)."""
+    """A db_infoscreen row; IRIS rows have scheduledDeparture, HAFAS rows scheduledTime (as the connection card reads them)."""
     iris = "scheduledDeparture" in dep
     timestamp = dep.get("departure_timestamp")
     trip = None
@@ -213,7 +220,10 @@ def _sensor_row(dep: dict[str, Any], stop: dict[str, str]) -> Row:
         if kind and dep.get("trainNumber"):
             trip = {"train": f"{kind[0]} {dep['trainNumber']}", "station": stop["eva"]}
     elif dep.get("trip_id") or dep.get("tripId"):
-        trip = {"id": str(dep.get("trip_id") or dep.get("tripId")), "hafas": stop["network"]}
+        trip = {
+            "id": str(dep.get("trip_id") or dep.get("tripId")),
+            "hafas": stop["network"],
+        }
     return Row(
         line=tidy_line(dep.get("train"), dep.get("trainNumber")),
         destination=str(dep.get("destination") or ""),
@@ -280,21 +290,28 @@ class Filters:
             lines=[line_key(tidy_line(line)) for line in _as_list(config.get("lines"))],
             platforms=[p.lower() for p in _as_list(config.get("platforms"))],
             destinations=[d.lower() for d in _as_list(config.get("destinations"))],
-            hide_destinations=[d.lower() for d in _as_list(config.get("hide_destinations"))],
+            hide_destinations=[
+                d.lower() for d in _as_list(config.get("hide_destinations"))
+            ],
         )
 
     def __call__(self, row: Row) -> bool:
-        """Return whether a row passes, like the connection card's filter:
-        platform "2" also matches BVG's "2 (U2)"; destinations match a part
-        of the name."""
+        """Return whether a row passes, like the connection card's filter: platform "2" also matches BVG's "2 (U2)"; destinations match a part of the name."""
         platform = row.platform.lower()
         destination = row.destination.lower()
         return (
-            (not self.platforms or any(
-                platform == p or platform.startswith(f"{p} ") for p in self.platforms
-            ))
+            (
+                not self.platforms
+                or any(
+                    platform == p or platform.startswith(f"{p} ")
+                    for p in self.platforms
+                )
+            )
             and (not self.lines or line_key(row.line) in self.lines)
-            and (not self.destinations or any(d in destination for d in self.destinations))
+            and (
+                not self.destinations
+                or any(d in destination for d in self.destinations)
+            )
             and not any(d in destination for d in self.hide_destinations)
         )
 
@@ -340,7 +357,9 @@ async def _goes_towards(
                 except DbfError:
                     verdicts[key] = None
                 else:
-                    verdicts[key] = _calls_after(trip["stops"], here, stop.get("name"), towards)
+                    verdicts[key] = _calls_after(
+                        trip["stops"], here, stop.get("name"), towards
+                    )
         verdict = verdicts[key]
         if verdict:
             kept.append(row)
@@ -356,7 +375,9 @@ def _calls_after(
         (
             i
             for i, s in enumerate(stops)
-            if s.get("current") or (s.get("eva") and s["eva"] in here) or _same_name(s.get("name"), name)
+            if s.get("current")
+            or (s.get("eva") and s["eva"] in here)
+            or _same_name(s.get("name"), name)
         ),
         -1,
     )
@@ -411,7 +432,9 @@ async def _resolve_stop(
     coordinator: SpdbfCoordinator, name: str | None, place: Place
 ) -> Stop:
     if name:
-        stops, _origin, _as_of = await coordinator.client.async_search(name, place.position)
+        stops, _origin, _as_of = await coordinator.client.async_search(
+            name, place.position
+        )
         if not stops:
             raise AssistError(f"No stop called '{name}' found")
         return stops[0]
@@ -426,8 +449,7 @@ async def _resolve_stop(
 
 
 async def _nearby(coordinator: SpdbfCoordinator, place: Place) -> list[Stop]:
-    """Return the stops near a place; while DBF can't look them up, the
-    nearest few from Transitous (Assist only: the map keeps its own)."""
+    """Return the stops near a place; while DBF can't look them up, the nearest few from Transitous (Assist only: the map keeps its own)."""
     assert place.position is not None
     try:
         return await coordinator.async_nearby(place.position)
@@ -457,7 +479,8 @@ async def _stop_board(coordinator: SpdbfCoordinator, stop: Stop) -> Board:
 def _upcoming(rows: list[Row], now: datetime, within: int) -> list[Row]:
     end = now + timedelta(minutes=within)
     return [
-        row for row in rows
+        row
+        for row in rows
         if row.expected is None or now - timedelta(minutes=1) <= row.expected <= end
     ]
 
@@ -489,14 +512,20 @@ async def departures(
     board = await _stop_board(coordinator, found)
     now = dt_util.now()
     within = min(within_minutes, ASSIST_MAX_WINDOW)
-    rows = [row for row in _upcoming([_board_row(d) for d in board.departures], now, within) if filters(row)]
+    rows = [
+        row
+        for row in _upcoming([_board_row(d) for d in board.departures], now, within)
+        if filters(row)
+    ]
     origin = _board_origin(board)
     result = _stop_json(found, place)
     result["data"] = _source_note(origin, board.as_of)
     if board.error and not board.departures:
         result["error"] = board.error
     if towards:
-        rows, unknown = await _goes_towards(coordinator, _stop_ref(found), rows, towards)
+        rows, unknown = await _goes_towards(
+            coordinator, _stop_ref(found), rows, towards
+        )
         if unknown:
             result["not_checked"] = (
                 f"{unknown} departures couldn't be checked for calling at {towards}"
@@ -511,13 +540,17 @@ async def departures(
             # A big station has many platforms: the answer stays as short as
             # a flat list's longest.
             if listed >= ASSIST_MAX_ROWS:
-                result["truncated"] = f"Only the first {ASSIST_MAX_ROWS} departures are listed."
+                result["truncated"] = (
+                    f"Only the first {ASSIST_MAX_ROWS} departures are listed."
+                )
                 break
             platforms.setdefault(platform, []).append(row_json(row, now))
             listed += 1
         result["platforms"] = dict(sorted(platforms.items()))
     else:
-        result["departures"] = [row_json(row, now) for row in rows[: min(count, ASSIST_MAX_ROWS)]]
+        result["departures"] = [
+            row_json(row, now) for row in rows[: min(count, ASSIST_MAX_ROWS)]
+        ]
     if not rows and origin != NO_DATA:
         result["note"] = f"No matching departures in the next {within} minutes."
     return result
@@ -531,8 +564,7 @@ async def line_status(
     lines: str | list[str] | None,
     within_minutes: int,
 ) -> dict[str, Any]:
-    """Return how each line at a stop is running: next departure, delays,
-    cancellations, disruption notices, and asked lines that don't run."""
+    """Return how each line at a stop is running: next departure, delays, cancellations, disruption notices, and asked lines that don't run."""
     found = await _resolve_stop(coordinator, stop, place)
     board = await _stop_board(coordinator, found)
     now = dt_util.now()
@@ -566,7 +598,9 @@ async def line_status(
         if running:
             item["next_in_minutes"] = _minutes_from(running[0].expected, now)
         # Disruption notices travel with trips (BVG/HAFAS only).
-        with_trip = next((row for row in on_line if row.trip and "id" in row.trip), None)
+        with_trip = next(
+            (row for row in on_line if row.trip and "id" in row.trip), None
+        )
         if with_trip and trips < ASSIST_MAX_TRIPS:
             trips += 1
             try:
@@ -600,8 +634,7 @@ def _short_notice(text: Any) -> str:
 def _add_notices(
     item: dict[str, Any], line: str, messages: list[Any], seen: dict[str, str]
 ) -> None:
-    """Add a line's first 3 notices, shortened; a notice already listed for
-    another line (a station-wide one, often on every trip) only names it."""
+    """Add a line's first 3 notices, shortened; a notice already listed for another line (a station-wide one, often on every trip) only names it."""
     fresh: list[str] = []
     same_as: list[str] = []
     for message in messages[:3]:
@@ -631,7 +664,9 @@ async def nearby_stops(
     for stop in stops[:count]:
         item = _stop_json(stop, place)
         item["networks"] = stop.networks
-        if lines := list(dict.fromkeys(d.get("line") for d in stop.board.departures if d.get("line"))):
+        if lines := list(
+            dict.fromkeys(d.get("line") for d in stop.board.departures if d.get("line"))
+        ):
             item["lines_seen"] = lines
         out.append(item)
     result: dict[str, Any] = {"near": place.label, "stops": out}
@@ -666,7 +701,9 @@ class Leg:
     ride_lines: list[str] | None = None
 
 
-async def _leg_rows(coordinator: SpdbfCoordinator, leg: Leg, now: datetime) -> tuple[list[Row], str]:
+async def _leg_rows(
+    coordinator: SpdbfCoordinator, leg: Leg, now: datetime
+) -> tuple[list[Row], str]:
     rows, origin, as_of = await leg.rows()
     rows = [row for row in _upcoming(rows, now, ASSIST_MAX_WINDOW) if leg.filters(row)]
     if leg.towards:
@@ -677,21 +714,24 @@ async def _leg_rows(coordinator: SpdbfCoordinator, leg: Leg, now: datetime) -> t
 async def plan(
     coordinator: SpdbfCoordinator, legs: list[Leg], *, options: int
 ) -> dict[str, Any]:
-    """Return the next ways through the legs: which departure, ride time,
-    arrival, the change, and the next leg's catchable departure."""
+    """Return the next ways through the legs: which departure, ride time, arrival, the change, and the next leg's catchable departure."""
     now = dt_util.now()
     leg_rows = [await _leg_rows(coordinator, leg, now) for leg in legs]
     notes = list(dict.fromkeys(note for _, note in leg_rows))
     first_rows, _ = leg_rows[0]
     ready = now + timedelta(minutes=legs[0].walk_before)
-    starts = [row for row in first_rows if not row.cancelled and row.expected and row.expected >= ready]
+    starts = [
+        row
+        for row in first_rows
+        if not row.cancelled and row.expected and row.expected >= ready
+    ]
     result: dict[str, Any] = {"data": notes[0] if len(notes) == 1 else notes}
     if legs[0].walk_before:
         result["walk_to_first_stop_minutes"] = legs[0].walk_before
-    found = []
-    for start in starts[: min(options, ASSIST_MAX_OPTIONS)]:
-        found.append(await _follow(coordinator, legs, leg_rows, start, now))
-    result["options"] = found
+    result["options"] = [
+        await _follow(coordinator, legs, leg_rows, start, now)
+        for start in starts[: min(options, ASSIST_MAX_OPTIONS)]
+    ]
     if not starts:
         result["note"] = f"No catchable departures for the first leg ({legs[0].title})."
     return result
@@ -724,11 +764,15 @@ async def _follow(
         )
         if ride is None:
             step["ride"] = "unknown"
-            option["note"] = "The ride time couldn't be found, so the later legs are left out."
+            option["note"] = (
+                "The ride time couldn't be found, so the later legs are left out."
+            )
             break
         arrival = row.expected + timedelta(minutes=ride["minutes"])
         step["ride_minutes"] = ride["minutes"]
-        step["arrives"] = f"{_clock(arrival)} at {leg.ride_to.get('title') or leg.ride_to.get('name')}"
+        step["arrives"] = (
+            f"{_clock(arrival)} at {leg.ride_to.get('title') or leg.ride_to.get('name')}"
+        )
         if i + 1 == len(legs):
             option["arrival"] = _clock(arrival)
             if leg.walk_after:
@@ -739,10 +783,17 @@ async def _follow(
         catchable = arrival + timedelta(minutes=nxt.walk_before)
         rows, _note = leg_rows[i + 1]
         row = next(
-            (r for r in rows if not r.cancelled and r.expected and r.expected >= catchable), None
+            (
+                r
+                for r in rows
+                if not r.cancelled and r.expected and r.expected >= catchable
+            ),
+            None,
         )
         if row is None:
-            option["note"] = f"No catchable departure at {nxt.title} after {_clock(catchable)} yet."
+            option["note"] = (
+                f"No catchable departure at {nxt.title} after {_clock(catchable)} yet."
+            )
             break
         assert row.expected is not None
         step["change_minutes"] = int((row.expected - arrival).total_seconds() // 60)
@@ -757,7 +808,11 @@ def board_leg(
 
     async def rows() -> tuple[list[Row], str, Any]:
         board = await _stop_board(coordinator, stop)
-        return [_board_row(d) for d in board.departures], _board_origin(board), board.as_of
+        return (
+            [_board_row(d) for d in board.departures],
+            _board_origin(board),
+            board.as_of,
+        )
 
     return rows
 
@@ -779,7 +834,10 @@ async def connection(
         # 0 is a real answer (a change on the same platform), not "unset".
         walk = spec.get("walk_minutes")
         if i + 1 < len(stops):
-            ride_to: dict[str, Any] | None = {"eva": stops[i + 1].eva, "name": stops[i + 1].name}
+            ride_to: dict[str, Any] | None = {
+                "eva": stops[i + 1].eva,
+                "name": stops[i + 1].name,
+            }
         else:
             ride_to = {"name": to} if to else None
         built.append(
@@ -831,17 +889,26 @@ async def dashboard_commutes(hass: HomeAssistant) -> list[Commute]:
             for section in sections:
                 cards = section.get("cards") or []
                 connection_cards = [
-                    c for c in cards if c.get("type") == CONNECTION_CARD and c.get("entity")
+                    c
+                    for c in cards
+                    if c.get("type") == CONNECTION_CARD and c.get("entity")
                 ]
                 if not connection_cards:
                     continue
                 heading = next(
-                    (c.get("heading") for c in cards if c.get("type") == "heading" and c.get("heading")),
+                    (
+                        c.get("heading")
+                        for c in cards
+                        if c.get("type") == "heading" and c.get("heading")
+                    ),
                     None,
                 )
                 found.append(
                     Commute(
-                        name=heading or section.get("title") or view.get("title") or "Connections",
+                        name=heading
+                        or section.get("title")
+                        or view.get("title")
+                        or "Connections",
                         dashboard=url_path or "overview",
                         cards=connection_cards,
                         visibility=section.get("visibility"),
@@ -850,7 +917,9 @@ async def dashboard_commutes(hass: HomeAssistant) -> list[Commute]:
     return found
 
 
-def _condition(hass: HomeAssistant, cond: dict[str, Any], person: State | None) -> bool | None:
+def _condition(
+    hass: HomeAssistant, cond: dict[str, Any], person: State | None
+) -> bool | None:
     """Evaluate a dashboard visibility condition; None if it can't be here."""
     kind = cond.get("condition")
     if kind in ("and", "or", "not"):
@@ -891,8 +960,7 @@ def relevant_now(
 
 
 def _configured_network(hass: HomeAssistant, entity_id: str) -> str | None:
-    """The network a db_infoscreen sensor is set up for (its data source),
-    if it is one DBF serves here: DB (IRIS) or a HAFAS service."""
+    """The network a db_infoscreen sensor is set up for (its data source), if it is one DBF serves here: DB (IRIS) or a HAFAS service."""
     entity = er.async_get(hass).async_get(entity_id)
     entry = (
         hass.config_entries.async_get_entry(entity.config_entry_id)
@@ -904,15 +972,21 @@ def _configured_network(hass: HomeAssistant, entity_id: str) -> str | None:
     source = str({**entry.data, **entry.options}.get("data_source") or "IRIS-TTS")
     if source == "IRIS-TTS":
         return SOURCE_DB
-    # "BVG – Berliner Verkehrsbetriebe", or older entries' "hafas=BVG".
+    # "BVG – Berliner Verkehrsbetriebe", or older entries' "hafas=BVG".  # noqa: RUF003
     # EFA sources aren't DBF HAFAS services; "AVV" is both (Aachen: HAFAS).
-    if source.startswith("efa=") or (source.startswith("AVV ") and "Aachen" not in source):
+    if source.startswith("efa=") or (
+        source.startswith("AVV ") and "Aachen" not in source
+    ):
         return None
     code = source.split(" – ", 1)[0] if " – " in source else source.rsplit("=", 1)[-1]
-    return next((s for s in HAFAS_SOURCES if s.casefold() == code.strip().casefold()), None)
+    return next(
+        (s for s in HAFAS_SOURCES if s.casefold() == code.strip().casefold()), None
+    )
 
 
-def _sensor_stop(hass: HomeAssistant, state: State | None, title: str) -> dict[str, Any] | None:
+def _sensor_stop(
+    hass: HomeAssistant, state: State | None, title: str
+) -> dict[str, Any] | None:
     """The station of a db_infoscreen sensor, as the connection card finds it."""
     if state is None:
         return None
@@ -931,40 +1005,54 @@ def _sensor_stop(hass: HomeAssistant, state: State | None, title: str) -> dict[s
     return {"eva": station, "name": name, "network": network}
 
 
-def _card_ride_lines(state: State | None, card: dict[str, Any], stop: dict[str, Any]) -> list[str]:
-    """The lines a connection card times its ride on: those of the sensor's
-    rows it shows, all the sensor's if it shows none (sorted, as the card
-    sends them; empty means any line)."""
+def _card_ride_lines(
+    state: State | None, card: dict[str, Any], stop: dict[str, Any]
+) -> list[str]:
+    """The lines a connection card times its ride on: those of the sensor's rows it shows, all the sensor's if it shows none (sorted, as the card sends them; empty means any line)."""
     raw = state.attributes.get("next_departures") if state else None
-    rows = [_sensor_row(d, stop) for d in raw if isinstance(d, dict)] if isinstance(raw, list) else []
+    rows = (
+        [_sensor_row(d, stop) for d in raw if isinstance(d, dict)]
+        if isinstance(raw, list)
+        else []
+    )
     shown = [row for row in rows if Filters.of(card)(row)] or rows
     return sorted({row.line for row in shown if row.line})
 
 
 def sensor_leg(
-    hass: HomeAssistant, coordinator: SpdbfCoordinator, entity: str, stop: dict[str, Any]
+    hass: HomeAssistant,
+    coordinator: SpdbfCoordinator,
+    entity: str,
+    stop: dict[str, Any],
 ) -> Callable[[], Awaitable[tuple[list[Row], str, Any]]]:
-    """Return a leg's departures from its db_infoscreen sensor; from the
-    station's board while DBF can't deliver (the sensor then keeps
-    recalculating its last board and never goes unavailable)."""
+    """Return a leg's departures from its db_infoscreen sensor; from the station's board while DBF can't deliver (the sensor then keeps recalculating its last board and never goes unavailable)."""
 
     async def rows() -> tuple[list[Row], str, Any]:
         state = hass.states.get(entity)
         sensor_rows = state.attributes.get("next_departures") if state else None
         if isinstance(sensor_rows, list) and not coordinator.client.degraded:
-            return [_sensor_row(d, stop) for d in sensor_rows if isinstance(d, dict)], "dbf", None
-        board = await coordinator.async_board(stop["eva"], stop["network"], name=stop["name"])
-        return [_board_row(d) for d in board.departures], _board_origin(board), board.as_of
+            return (
+                [_sensor_row(d, stop) for d in sensor_rows if isinstance(d, dict)],
+                "dbf",
+                None,
+            )
+        board = await coordinator.async_board(
+            stop["eva"], stop["network"], name=stop["name"]
+        )
+        return (
+            [_board_row(d) for d in board.departures],
+            _board_origin(board),
+            board.as_of,
+        )
 
     return rows
 
 
 def _card_int(value: Any, default: int) -> int:
-    """A whole number from a card's YAML ("3", 3.5, "3.5"); default if it
-    isn't one, as the card itself goes on with it."""
+    """A whole number from a card's YAML ("3", 3.5, "3.5"); default if it isn't one, as the card itself goes on with it."""
     try:
         number = int(float(value))
-    except (TypeError, ValueError, OverflowError):
+    except TypeError, ValueError, OverflowError:
         return default
     return max(0, number)
 
@@ -972,8 +1060,7 @@ def _card_int(value: Any, default: int) -> int:
 def _commute_legs(
     hass: HomeAssistant, coordinator: SpdbfCoordinator, commute: Commute
 ) -> list[Leg] | None:
-    """Return the commute's legs, or None if its cards aren't linked by rides
-    (then they are separate boards)."""
+    """Return the commute's legs, or None if its cards aren't linked by rides (then they are separate boards)."""
     if not any(c.get("ride_to") or c.get("ride_to_station") for c in commute.cards):
         return None
     legs: list[Leg] = []
@@ -989,7 +1076,9 @@ def _commute_legs(
         # ride keys match the card's.
         stop = _sensor_stop(hass, state, card.get("title") or "")
         if stop is None:
-            raise AssistError(f"The sensor of '{title}' ({card['entity']}) has no station right now")
+            raise AssistError(
+                f"The sensor of '{title}' ({card['entity']}) has no station right now"
+            )
         nxt = by_entity.get(card.get("ride_to") or "")
         ride_to = None
         if card.get("ride_to"):
@@ -1028,11 +1117,12 @@ async def commutes(
     name: str | None,
     options: int,
 ) -> dict[str, Any]:
-    """Return the dashboard commutes: matching ones (by name), else those the
-    dashboard shows now, worked out; the rest listed by name."""
+    """Return the dashboard commutes: matching ones (by name), else those the dashboard shows now, worked out; the rest listed by name."""
     found = await dashboard_commutes(hass)
     if not found:
-        raise AssistError("No dashboard has connection cards (custom:spdbf-connection-card)")
+        raise AssistError(
+            "No dashboard has connection cards (custom:spdbf-connection-card)"
+        )
     if name:
         wanted = name.casefold()
         chosen = [c for c in found if wanted in c.name.casefold()]
@@ -1060,7 +1150,9 @@ async def commutes(
     if others:
         result["other_commutes"] = others
     if not chosen:
-        result["note"] = "None of the commutes is shown on the dashboard right now; name one."
+        result["note"] = (
+            "None of the commutes is shown on the dashboard right now; name one."
+        )
     return result
 
 
@@ -1075,12 +1167,20 @@ async def _commute_boards(
         if stop is None:
             boards.append({"at": title, "error": "its sensor has no station right now"})
             continue
-        rows, origin, as_of = await sensor_leg(hass, coordinator, card["entity"], stop)()
-        rows = [r for r in _upcoming(rows, now, ASSIST_MAX_WINDOW) if Filters.of(card)(r)]
-        boards.append({
-            "at": title,
-            "data": _source_note(origin, as_of),
-            "departures": [row_json(r, now) for r in rows[: _card_int(card.get("departures"), 5) or 5]],
-        })
+        rows, origin, as_of = await sensor_leg(
+            hass, coordinator, card["entity"], stop
+        )()
+        rows = [
+            r for r in _upcoming(rows, now, ASSIST_MAX_WINDOW) if Filters.of(card)(r)
+        ]
+        boards.append(
+            {
+                "at": title,
+                "data": _source_note(origin, as_of),
+                "departures": [
+                    row_json(r, now)
+                    for r in rows[: _card_int(card.get("departures"), 5) or 5]
+                ],
+            }
+        )
     return boards
-

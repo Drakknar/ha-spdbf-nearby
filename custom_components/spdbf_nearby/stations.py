@@ -4,8 +4,6 @@ No network access here: dbf.py fetches, this module decides what is the
 same station, what a line is called, and how results are ordered.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -271,8 +269,7 @@ def merge_same_board(stops: list[Stop]) -> list[Stop]:
 def rank_search(
     stops: list[Stop], query: str, distance: Callable[[Stop], float | None]
 ) -> list[Stop]:
-    """Order search results: the station itself, then names containing the
-    query, then the rest; nearest first within each group.
+    """Order search results: the station itself, then names containing the query, then the rest; nearest first within each group.
 
     DB's station list matches loosely ("Neanderthal" for "Alexanderplatz"),
     and DBF lists DB before BVG, so DBF's own order is no guide.
