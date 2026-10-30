@@ -6,23 +6,34 @@
 // again. If that fetch fails (the companion app often opens before the
 // network or VPN is up), the cards would show "Custom element doesn't exist"
 // until the app reloads. Retried here instead; Home Assistant rebuilds those
-// cards by itself once their element is defined.
+// cards by itself once their element is defined. An import can also hang
+// instead of failing, which reports nothing, so each one gets a time limit.
 (() => {
   if (window.spdbfLoader) return;
   window.spdbfLoader = true;
 
   const FILES = ["dbf-core.js", "spdbf-stop-search-card.js", "spdbf-connection-card.js"];
   const RETRY_MS = [2000, 5000, 15000, 30000, 60000];
+  const IMPORT_LIMIT_MS = 10000;
   const here = new URL(import.meta.url);
   const version = here.searchParams.get("v") ?? "";
 
+  const importWithLimit = (href) => {
+    let timer;
+    const limit = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("timed out")), IMPORT_LIMIT_MS);
+    });
+    return Promise.race([import(href), limit]).finally(() => clearTimeout(timer));
+  };
+
   // A retry gets its own URL, since the browser may keep a failed module
-  // import for the page's lifetime. The files guard against loading twice.
+  // import for the page's lifetime. The files guard against loading twice,
+  // so a timed out import that still finishes later does no harm.
   const load = (file, attempt = 0) => {
     const url = new URL(file, here);
     url.searchParams.set("v", version);
     if (attempt) url.searchParams.set("retry", String(attempt));
-    return import(url.href).catch((err) => {
+    return importWithLimit(url.href).catch((err) => {
       console.warn(`spdbf Public Transport: couldn't load ${file}, retrying`, err);
       return new Promise((resolve) => {
         const again = () => {
