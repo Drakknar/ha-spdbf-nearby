@@ -3,7 +3,7 @@
 from collections.abc import Awaitable
 from typing import Any
 
-import voluptuous as vol
+import probatio
 
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntryState
@@ -14,10 +14,10 @@ from .coordinator import SpdbfCoordinator
 from .dbf import DbfError, ServerUnreachable
 from .stations import Position, Stop
 
-_ENTRY = vol.Optional("entry_id")
+_ENTRY = probatio.Optional("entry_id")
 _POSITION = {
-    vol.Inclusive("latitude", "position"): vol.Coerce(float),
-    vol.Inclusive("longitude", "position"): vol.Coerce(float),
+    probatio.Inclusive("latitude", "position"): probatio.Coerce(float),
+    probatio.Inclusive("longitude", "position"): probatio.Coerce(float),
 }
 
 
@@ -123,8 +123,8 @@ def _stop_json(
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): f"{DOMAIN}/search",
-        vol.Required("query"): str,
+        probatio.Required("type"): f"{DOMAIN}/search",
+        probatio.Required("query"): str,
         _ENTRY: str,
         **_POSITION,
     }
@@ -152,7 +152,7 @@ async def ws_search(
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/nearby", _ENTRY: str, **_POSITION}
+    {probatio.Required("type"): f"{DOMAIN}/nearby", _ENTRY: str, **_POSITION}
 )
 @websocket_api.async_response
 async def ws_nearby(
@@ -172,14 +172,14 @@ async def ws_nearby(
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): f"{DOMAIN}/board",
-        vol.Required("eva"): str,
-        vol.Required("network"): str,
-        vol.Optional("linked"): [
-            {vol.Required("eva"): str, vol.Required("network"): str}
+        probatio.Required("type"): f"{DOMAIN}/board",
+        probatio.Required("eva"): str,
+        probatio.Required("network"): str,
+        probatio.Optional("linked"): [
+            {probatio.Required("eva"): str, probatio.Required("network"): str}
         ],
         # To find the stop on Transitous while DBF can't deliver.
-        vol.Optional("name"): str,
+        probatio.Optional("name"): str,
         **_POSITION,
         _ENTRY: str,
     }
@@ -220,16 +220,20 @@ async def ws_board(
     )
 
 
-_TRIP = vol.Any(
-    {vol.Required("id"): str, vol.Required("hafas"): str},
-    {vol.Required("train"): str, vol.Required("station"): str},
-    {vol.Required("transitous"): str},
+_TRIP = probatio.Any(
+    {probatio.Required("id"): str, probatio.Required("hafas"): str},
+    {probatio.Required("train"): str, probatio.Required("station"): str},
+    {probatio.Required("transitous"): str},
 )
-_STATION = {vol.Optional("eva"): str, vol.Optional("name"): str}
+_STATION = {probatio.Optional("eva"): str, probatio.Optional("name"): str}
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): f"{DOMAIN}/trip", vol.Required("trip"): _TRIP, _ENTRY: str}
+    {
+        probatio.Required("type"): f"{DOMAIN}/trip",
+        probatio.Required("trip"): _TRIP,
+        _ENTRY: str,
+    }
 )
 @websocket_api.async_response
 async def ws_trip(
@@ -249,10 +253,10 @@ async def ws_trip(
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): f"{DOMAIN}/ride",
-        vol.Required("from"): {**_STATION, vol.Optional("network"): str},
-        vol.Required("to"): _STATION,
-        vol.Optional("lines"): [str],
+        probatio.Required("type"): f"{DOMAIN}/ride",
+        probatio.Required("from"): {**_STATION, probatio.Optional("network"): str},
+        probatio.Required("to"): _STATION,
+        probatio.Optional("lines"): [str],
         _ENTRY: str,
     }
 )
