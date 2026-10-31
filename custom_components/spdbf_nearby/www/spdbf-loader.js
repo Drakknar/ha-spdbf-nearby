@@ -8,6 +8,13 @@
 // until the app reloads. Retried here instead; Home Assistant rebuilds those
 // cards by itself once their element is defined. An import can also hang
 // instead of failing, which reports nothing, so each one gets a time limit.
+//
+// The cards must not load before Home Assistant's app does. Its app.js replaces
+// window.customElements with a new registry, and an element defined earlier
+// stays in the old one, where the frontend never finds it. From the browser
+// cache this module easily runs first: "Configuration error" on every reload,
+// fine again after clearing the cache. home-assistant is defined after that
+// swap, so the cards wait for it.
 (() => {
   if (window.spdbfLoader) return;
   window.spdbfLoader = true;
@@ -15,6 +22,7 @@
   const FILES = ["dbf-core.js", "spdbf-stop-search-card.js", "spdbf-connection-card.js"];
   const RETRY_MS = [2000, 5000, 15000, 30000, 60000];
   const IMPORT_LIMIT_MS = 10000;
+  const APP_LIMIT_MS = 30000; // load anyway, should the element ever be renamed
   const here = new URL(import.meta.url);
   const version = here.searchParams.get("v") ?? "";
 
@@ -52,5 +60,9 @@
     });
   };
 
-  FILES.forEach((file) => load(file));
+  const appLoaded = Promise.race([
+    customElements.whenDefined("home-assistant"),
+    new Promise((resolve) => setTimeout(resolve, APP_LIMIT_MS)),
+  ]);
+  appLoaded.then(() => FILES.forEach((file) => load(file)));
 })();
