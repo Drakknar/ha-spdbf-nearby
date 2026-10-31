@@ -3,8 +3,9 @@ name: Checks
 # Runs on every pull request (Dependabot's included) and on pushes to main:
 # the pytest suite in tests/ on Home Assistant's test harness, and actionlint
 # on the workflows themselves.
-# Not a required check yet: pull requests opened by the Compatibility review
-# use GITHUB_TOKEN, which doesn't trigger this workflow.
+# Its jobs are required on main. Pull requests opened by the Compatibility review
+# use GITHUB_TOKEN, which doesn't trigger this workflow: close and reopen one by
+# hand to run them. Release waits for this workflow on main.
 on:
   pull_request:
   push:
