@@ -36,9 +36,11 @@ def _unreachable_id(entry: MockConfigEntry) -> str:
     return f"{ISSUE_SERVER_UNREACHABLE}_{entry.entry_id}"
 
 
-def _status(hass: HomeAssistant, entry_id: str) -> DbfStatus:
+def _status(
+    hass: HomeAssistant, entry_id: str, *, map_stops: bool = False
+) -> DbfStatus:
     # problem_after 0: the first failing round is a problem.
-    return DbfStatus(hass, entry_id, SERVER, timedelta(0), True)
+    return DbfStatus(hass, entry_id, SERVER, timedelta(0), True, map_stops=map_stops)
 
 
 async def test_unreachable_notice_is_linked_to_the_entry(hass: HomeAssistant) -> None:
@@ -148,7 +150,9 @@ async def test_no_notice_for_a_removed_entry(
 async def test_notice_ends_when_the_long_failure_recovers(hass: HomeAssistant) -> None:
     """DB recovers while BVG has only just started failing: no problem, no notice."""
     entry = _entry(hass)
-    status = DbfStatus(hass, entry.entry_id, SERVER, timedelta(minutes=10), True)
+    status = DbfStatus(
+        hass, entry.entry_id, SERVER, timedelta(minutes=10), True, map_stops=False
+    )
     registry = ir.async_get(hass)
     start = dt_util.utcnow()
     for minutes, checks in (
@@ -177,11 +181,33 @@ async def test_notice_ends_when_there_is_nothing_to_check(hass: HomeAssistant) -
     old.async_close()
     assert ir.async_get(hass).async_get_issue(DOMAIN, _unreachable_id(entry))
 
-    new = _status(hass, entry.entry_id)
+    new = _status(hass, entry.entry_id, map_stops=False)
     new.record({})
     assert not new.problem
     assert new.last_check is None
     assert ir.async_get(hass).async_get_issue(DOMAIN, _unreachable_id(entry)) is None
+
+
+async def test_empty_round_with_map_stops_keeps_the_state(hass: HomeAssistant) -> None:
+    """With map stops on, a round without stops to check changes nothing."""
+    entry = _entry(hass)
+    status = _status(hass, entry.entry_id, map_stops=True)
+    status.record({"DB": "timeout"})
+    assert status.problem
+    last_check = status.last_check
+
+    status.record({})
+    assert status.problem
+    assert status.failing("DB")
+    assert status.last_check == last_check
+    assert ir.async_get(hass).async_get_issue(DOMAIN, _unreachable_id(entry))
+
+    # Nor does it end a notice kept from before a reload.
+    status.async_close()
+    new = _status(hass, entry.entry_id, map_stops=True)
+    new.record({})
+    assert not new.problem
+    assert ir.async_get(hass).async_get_issue(DOMAIN, _unreachable_id(entry))
 
 
 async def test_no_unreachable_notice_for_a_removed_entry(hass: HomeAssistant) -> None:

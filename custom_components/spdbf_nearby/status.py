@@ -30,14 +30,21 @@ class DbfStatus:
         server: str,
         problem_after: timedelta,
         fallback: bool,
+        *,
+        map_stops: bool,
     ) -> None:
-        """Initialize the status of one config entry."""
+        """Initialize the status of one config entry.
+
+        With map stops on, a round can be empty because no stop was found;
+        with them off, only because nothing can be checked at all.
+        """
         self.hass = hass
         self._entry_id = entry_id
         self._issue_id = f"{ISSUE_SERVER_UNREACHABLE}_{entry_id}"
         self._server = server
         self._problem_after = problem_after
         self._fallback = fallback
+        self._map_stops = map_stops
         # Network -> since when its checks fail, and why.
         self._failing: dict[str, tuple[datetime, str]] = {}
         self.last_check: datetime | None = None
@@ -75,11 +82,15 @@ class DbfStatus:
         # A check still running when the entry unloaded is dropped.
         if self._closed:
             return
+        # No stop found nearby to check: nothing new is known, so the
+        # previous state stays.
+        if not checks and self._map_stops:
+            return
         now = dt_util.utcnow()
         if checks:
             self.last_check = now
-        # A network no longer checked (no stop of it around, or none at all:
-        # no DB/BVG source and map stops off) no longer fails.
+        # A network no longer checked (no stop of it around, or none at all by
+        # design: no DB/BVG source and map stops off) no longer fails.
         self._failing = {net: v for net, v in self._failing.items() if net in checks}
         for network, why in checks.items():
             if why is None:

@@ -25,8 +25,10 @@ from .const import (
     BOARD_DEPARTURES,
     BOARD_ROWS,
     CONF_FALLBACK,
+    CONF_MAP_STOPS,
     CONF_PROBLEM_AFTER,
     DEFAULT_FALLBACK,
+    DEFAULT_MAP_STOPS,
     DEFAULT_PROBLEM_AFTER,
     FALLBACK_STOPS,
     LAST_KNOWN_BOARD_REFRESH,
@@ -69,6 +71,7 @@ class TransportService:
                 minutes=int(config.get(CONF_PROBLEM_AFTER, DEFAULT_PROBLEM_AFTER))
             ),
             fallback,
+            map_stops=bool(config.get(CONF_MAP_STOPS, DEFAULT_MAP_STOPS)),
         )
 
     async def async_setup(self) -> None:
