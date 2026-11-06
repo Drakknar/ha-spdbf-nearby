@@ -207,7 +207,7 @@ The resource is only added in storage mode (the default; in YAML mode resources 
 
 ## Development
 
-There are no automated tests in the repository; changes are checked with a scratch pytest run against Home Assistant's test harness. How the integration works, how changes have been checked, and the open items are in [`custom_components/spdbf_nearby/CLAUDE.md`](custom_components/spdbf_nearby/CLAUDE.md).
+The tests in `tests/` run in CI on Home Assistant's `pytest-homeassistant` harness at the minimum version from `hacs.json`. How the integration works, how changes have been checked, and the open items are in [`custom_components/spdbf_nearby/CLAUDE.md`](custom_components/spdbf_nearby/CLAUDE.md).
 
 ## License
 
