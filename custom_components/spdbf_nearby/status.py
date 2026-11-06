@@ -20,6 +20,14 @@ from .const import DOMAIN, ISSUE_SERVER_UNREACHABLE
 _LOGGER = logging.getLogger(__name__)
 
 
+def _since_text(since: datetime) -> str:
+    """Return when an outage began, local time: "23:40", or "Nov 6, 23:40" before today."""
+    local = dt_util.as_local(since)
+    if local.date() == dt_util.now().date():
+        return f"{local:%H:%M}"
+    return f"{local:%b} {local.day}, {local:%H:%M}"
+
+
 class DbfStatus:
     """The outcome of DBF's live checks."""
 
@@ -104,7 +112,7 @@ class DbfStatus:
             _LOGGER.warning(
                 "DBF at %s hasn't delivered departures since %s: %s",
                 self._server,
-                dt_util.as_local(since).strftime("%H:%M"),
+                _since_text(since),
                 self.reason,
             )
             self._create_issue()
@@ -134,7 +142,7 @@ class DbfStatus:
             translation_key=ISSUE_SERVER_UNREACHABLE,
             translation_placeholders={
                 "server": self._server,
-                "since": dt_util.as_local(since).strftime("%H:%M"),
+                "since": _since_text(since),
                 "reason": self.reason or "",
                 "fallback": (
                     "Meanwhile departures, trips and the stop search come from"
