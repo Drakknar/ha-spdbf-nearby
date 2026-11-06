@@ -20,10 +20,15 @@ from .const import DOMAIN, ISSUE_SERVER_UNREACHABLE
 _LOGGER = logging.getLogger(__name__)
 
 
-def _since_text(since: datetime) -> str:
-    """Return when an outage began, local time: "23:40", or "Nov 6, 23:40" before today."""
+def _since_text(since: datetime, *, date: bool = False) -> str:
+    """Return when an outage began, local time: "23:40", or "Nov 6, 23:40".
+
+    The date is shown when the outage began before today, or always with `date`:
+    the Repairs notice keeps its text until the problem ends, so it may be read
+    on a later day.
+    """
     local = dt_util.as_local(since)
-    if local.date() == dt_util.now().date():
+    if not date and local.date() == dt_util.now().date():
         return f"{local:%H:%M}"
     return f"{local:%b} {local.day}, {local:%H:%M}"
 
@@ -142,7 +147,7 @@ class DbfStatus:
             translation_key=ISSUE_SERVER_UNREACHABLE,
             translation_placeholders={
                 "server": self._server,
-                "since": _since_text(since),
+                "since": _since_text(since, date=True),
                 "reason": self.reason or "",
                 "fallback": (
                     "Meanwhile departures, trips and the stop search come from"

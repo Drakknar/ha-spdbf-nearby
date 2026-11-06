@@ -247,27 +247,13 @@ async def test_no_unreachable_notice_for_a_removed_entry(hass: HomeAssistant) ->
     assert not [domain for domain, _ in ir.async_get(hass).issues if domain == DOMAIN]
 
 
-async def test_notice_since_shows_the_date_before_today(hass: HomeAssistant) -> None:
-    """An outage from today shows the time; an older one also the date."""
+async def test_notice_since_shows_the_date(hass: HomeAssistant) -> None:
+    """The notice always shows the date: it keeps its text until the problem ends."""
     entry = _entry(hass)
-    registry = ir.async_get(hass)
-    issue_id = _unreachable_id(entry)
-
     status = _status(hass, entry.entry_id)
     status.record({"DB": "timeout"})
     since = dt_util.as_local(status.failing_since)
-    issue = registry.async_get_issue(DOMAIN, issue_id)
-    assert issue.translation_placeholders["since"] == since.strftime("%H:%M")
-    status.async_close()
-    ir.async_delete_issue(hass, DOMAIN, issue_id)
-
-    status = _status(hass, entry.entry_id)
-    with patch.object(
-        dt_util, "utcnow", return_value=dt_util.utcnow() - timedelta(days=1)
-    ):
-        status.record({"DB": "timeout"})
-    since = dt_util.as_local(status.failing_since)
-    issue = registry.async_get_issue(DOMAIN, issue_id)
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, _unreachable_id(entry))
     assert issue.translation_placeholders["since"] == (
         f"{since:%b} {since.day}, {since:%H:%M}"
     )
