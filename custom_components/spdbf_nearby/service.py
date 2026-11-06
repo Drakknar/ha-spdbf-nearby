@@ -80,8 +80,9 @@ class TransportService:
         await self.last_known.async_load()
 
     async def async_unload(self) -> None:
-        """Stop reporting status and save the last known answers."""
+        """Stop reporting status and notices, and save the last known answers."""
         self.status.async_close()
+        self.dbf.async_close()
         await self.last_known.async_flush()
 
     # --- Passed through to DBF -------------------------------------------

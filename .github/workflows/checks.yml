@@ -30,13 +30,19 @@ jobs:
         # The minimum Home Assistant (read from hacs.json, so CI follows a raise
         # there) with core's harness of the same version. The integration
         # depends on frontend and, through Assist, conversation; see the Testing
-        # section of custom_components/spdbf_nearby/CLAUDE.md.
+        # section of custom_components/spdbf_nearby/CLAUDE.md. Those packages are
+        # installed at the versions this Home Assistant pins (package_constraints.txt);
+        # all four are listed there. Python: Home Assistant's requires-python floor
+        # (>=3.14.2), within 3.14.
         run: |
           ha=$(jq -er .homeassistant hacs.json)
-          uv venv -p 3.14 "$RUNNER_TEMP/venv"
+          uv venv -p '>=3.14.2,<3.15' "$RUNNER_TEMP/venv"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
-          VIRTUAL_ENV=$RUNNER_TEMP/venv uv pip install "homeassistant==$ha" \
-            "pytest-homeassistant==$ha" \
+          export VIRTUAL_ENV=$RUNNER_TEMP/venv
+          uv pip install "homeassistant==$ha" "pytest-homeassistant==$ha"
+          constraints=$("$VIRTUAL_ENV/bin/python" -c 'import importlib.util, pathlib; print(pathlib.Path(importlib.util.find_spec("homeassistant").origin).parent / "package_constraints.txt")')
+          test -f "$constraints"
+          uv pip install -c "$constraints" \
             home-assistant-frontend hassil home-assistant-intents gazetteer-matcher
 
       - name: pytest
@@ -71,4 +77,4 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: actionlint
-        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 -color
