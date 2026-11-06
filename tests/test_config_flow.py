@@ -142,17 +142,21 @@ async def test_coordinator_without_map_settings(hass) -> None:
 async def test_new_entry_stores_the_hidden_map_settings(hass, aioclient_mock) -> None:
     """Set up with map stops off, the entry still stores the map settings (defaults), so 0.11.x can load it after a rollback."""
     aioclient_mock.post(f"{SERVER}/_geolocation", json={"candidates": []})
-    form = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
-    result = await hass.config_entries.flow.async_configure(
-        form["flow_id"],
-        {
-            CONF_SERVER_URL: SERVER,
-            CONF_TRACKED_ENTITY: "person.me",
-            CONF_SOURCES: ["DB"],
-            CONF_MAP_STOPS: False,
-            CONF_DEPARTURES: 2,
-        },
-    )
+    # Only the stored data matters here, not setting the entry up.
+    with patch("custom_components.spdbf_nearby.async_setup_entry", return_value=None):
+        form = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": "user"}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            form["flow_id"],
+            {
+                CONF_SERVER_URL: SERVER,
+                CONF_TRACKED_ENTITY: "person.me",
+                CONF_SOURCES: ["DB"],
+                CONF_MAP_STOPS: False,
+                CONF_DEPARTURES: 2,
+            },
+        )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     data = result["data"]
     assert data[CONF_DEPARTURES] == DEFAULT_DEPARTURES
