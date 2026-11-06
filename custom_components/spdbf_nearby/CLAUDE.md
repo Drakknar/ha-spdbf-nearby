@@ -68,7 +68,7 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
   - Moving 100 m or more, or a stop list older than 15 minutes, triggers a new stop lookup.
   - Smaller moves only refresh the distances, without asking DBF.
 - **Stop lookup:** `POST <server>/_geolocation` with `lat`, `lon` and `hafas=<service>`. It is called once per HAFAS source. Each call also returns the DB (IRIS) stations, flagged with `hafas == 0`, so DB needs no call of its own.
-  - Candidates without `lat`/`lon` are dropped, and a Repairs issue (`missing_coordinates_<entry_id>` since 0.12.0, linked to the entry; the old shared `missing_coordinates` is deleted at setup) explains that the server needs the patched image.
+  - Candidates without `lat`/`lon` are dropped, and a Repairs issue (`missing_coordinates_<entry_id>` since 0.12.0, linked to the entry; the old shared `missing_coordinates` is deleted at setup) explains that the server needs the patched image. Since 0.12.1 unload closes the `DbfClient` (`async_close`, like `DbfStatus`), so a late answer to the old client after a reload no longer creates a notice nobody deletes.
   - Stops are filtered by radius, sorted by distance and capped at the configured maximum.
   - If a lookup fails but stops are already known, the old list is kept.
 - **Departures:** `GET <server>/<eva>?mode=json&limit=<3 × departures>[&hafas=<service>]`, refreshed every scan interval (60 s by default). At most 4 requests run in parallel, because DBF's default container has only a few workers.

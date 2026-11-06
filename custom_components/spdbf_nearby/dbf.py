@@ -98,12 +98,22 @@ class DbfClient:
         self._down_since: datetime | None = None
         self._down_reason = ""
         self._retry_at: datetime | None = None
+        self._closed = False
 
     async def async_setup(self) -> None:
         """Load the IRIS time zone without blocking the event loop."""
         self._iris_tz = await dt_util.async_get_time_zone(IRIS_TIME_ZONE)
         # Before 0.12.0 the notice was one for all entries, not linked to any.
         ir.async_delete_issue(self.hass, DOMAIN, ISSUE_MISSING_COORDINATES)
+
+    @callback
+    def async_close(self) -> None:
+        """Stop changing Repairs notices (the entry unloads).
+
+        A request still running then may answer after the reload; the new
+        client owns the notice by then.
+        """
+        self._closed = True
 
     @property
     def down(self) -> bool:
@@ -275,7 +285,8 @@ class DbfClient:
 
     @callback
     def _set_coordinate_issue(self, missing: bool) -> None:
-        if missing == self._coordinate_issue:
+        # A late answer after unload (e.g. a reload): the new client decides.
+        if self._closed or missing == self._coordinate_issue:
             return
         # A late answer after the entry was removed: nothing to link a notice to.
         if self.hass.config_entries.async_get_entry(self._entry_id) is None:

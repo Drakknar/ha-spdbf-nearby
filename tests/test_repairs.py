@@ -147,6 +147,35 @@ async def test_no_notice_for_a_removed_entry(
     assert not [domain for domain, _ in ir.async_get(hass).issues if domain == DOMAIN]
 
 
+async def test_no_coordinate_notice_after_close(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    """A late answer to an unloaded client (a reload) creates no notice."""
+    aioclient_mock.post(
+        f"{SERVER}/_geolocation",
+        json={"candidates": [{"name": "X", "eva": "1", "hafas": "BVG"}]},
+    )
+    entry = _entry(hass)
+    client = DbfClient(hass, _config(SERVER), entry.entry_id)
+    await client.async_setup()
+    client.async_close()
+    await client.fetch_candidates(POSITION)
+    assert (
+        ir.async_get(hass).async_get_issue(
+            DOMAIN, f"{ISSUE_MISSING_COORDINATES}_{entry.entry_id}"
+        )
+        is None
+    )
+
+    # The same answer to an open client does create it.
+    client = DbfClient(hass, _config(SERVER), entry.entry_id)
+    await client.async_setup()
+    await client.fetch_candidates(POSITION)
+    assert ir.async_get(hass).async_get_issue(
+        DOMAIN, f"{ISSUE_MISSING_COORDINATES}_{entry.entry_id}"
+    )
+
+
 async def test_notice_ends_when_the_long_failure_recovers(hass: HomeAssistant) -> None:
     """DB recovers while BVG has only just started failing: no problem, no notice."""
     entry = _entry(hass)
