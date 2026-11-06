@@ -1,6 +1,7 @@
 """Repairs notices (status.py, dbf.py) belong to their config entry (HA 2026.11)."""
 
 from datetime import timedelta
+from unittest.mock import patch
 
 from pytest_homeassistant.common import MockConfigEntry
 
@@ -15,6 +16,7 @@ from custom_components.spdbf_nearby.dbf import DbfClient
 from custom_components.spdbf_nearby.status import DbfStatus
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.util import dt as dt_util
 
 SERVER = "http://dbf.local:8092"
 POSITION = {"lat": "52.5051", "lon": "13.3193"}
@@ -140,4 +142,51 @@ async def test_no_notice_for_a_removed_entry(
     client = DbfClient(hass, _config(SERVER), "removed-entry")
     await client.async_setup()
     await client.fetch_candidates(POSITION)
+    assert not [domain for domain, _ in ir.async_get(hass).issues if domain == DOMAIN]
+
+
+async def test_notice_ends_when_the_long_failure_recovers(hass: HomeAssistant) -> None:
+    """DB recovers while BVG has only just started failing: no problem, no notice."""
+    entry = _entry(hass)
+    status = DbfStatus(hass, entry.entry_id, SERVER, timedelta(minutes=10), True)
+    registry = ir.async_get(hass)
+    start = dt_util.utcnow()
+    for minutes, checks in (
+        (0, {"DB": "timeout", "BVG": None}),
+        (11, {"DB": "timeout", "BVG": None}),
+    ):
+        with patch.object(
+            dt_util, "utcnow", return_value=start + timedelta(minutes=minutes)
+        ):
+            status.record(checks)
+    assert status.problem
+    assert registry.async_get_issue(DOMAIN, _unreachable_id(entry)) is not None
+
+    with patch.object(dt_util, "utcnow", return_value=start + timedelta(minutes=12)):
+        status.record({"DB": None, "BVG": "timeout"})
+    assert not status.problem
+    assert status.failing("BVG")
+    assert registry.async_get_issue(DOMAIN, _unreachable_id(entry)) is None
+
+
+async def test_notice_ends_when_there_is_nothing_to_check(hass: HomeAssistant) -> None:
+    """After a reload without stations to check (no DB/BVG, no map stops), the kept notice ends."""
+    entry = _entry(hass)
+    old = _status(hass, entry.entry_id)
+    old.record({"DB": "timeout"})
+    old.async_close()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, _unreachable_id(entry))
+
+    new = _status(hass, entry.entry_id)
+    new.record({})
+    assert not new.problem
+    assert new.last_check is None
+    assert ir.async_get(hass).async_get_issue(DOMAIN, _unreachable_id(entry)) is None
+
+
+async def test_no_unreachable_notice_for_a_removed_entry(hass: HomeAssistant) -> None:
+    """Checks still running for a removed entry (failed unload) create nothing and don't raise."""
+    status = _status(hass, "removed-entry")
+    status.record({"DB": "timeout"})
+    assert status.problem
     assert not [domain for domain, _ in ir.async_get(hass).issues if domain == DOMAIN]

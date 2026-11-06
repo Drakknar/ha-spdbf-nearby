@@ -72,13 +72,14 @@ class DbfStatus:
     @callback
     def record(self, checks: dict[str, str | None]) -> None:
         """Take one round of checks (network -> error, or None if it worked)."""
-        # A check still running when the entry unloaded is dropped: after a
-        # removal its entry is gone, and an issue can't be linked to it.
-        if not checks or self._closed:
+        # A check still running when the entry unloaded is dropped.
+        if self._closed:
             return
         now = dt_util.utcnow()
-        self.last_check = now
-        # A network no longer checked (no stop of it around) no longer fails.
+        if checks:
+            self.last_check = now
+        # A network no longer checked (no stop of it around, or none at all:
+        # no DB/BVG source and map stops off) no longer fails.
         self._failing = {net: v for net, v in self._failing.items() if net in checks}
         for network, why in checks.items():
             if why is None:
@@ -96,7 +97,7 @@ class DbfStatus:
                 self.reason,
             )
             self._create_issue()
-        elif since is None:
+        elif since is None or (self.problem and not problem):
             if self.problem:
                 _LOGGER.info("DBF at %s delivers departures again", self._server)
             # Also ends a notice kept from before a reload.
@@ -106,6 +107,10 @@ class DbfStatus:
             listener()
 
     def _create_issue(self) -> None:
+        # After the entry was removed (e.g. a failed unload left the checks
+        # running), there is nothing to link a notice to: HA would raise.
+        if self.hass.config_entries.async_get_entry(self._entry_id) is None:
+            return
         since = self.failing_since
         assert since is not None
         ir.async_create_issue(

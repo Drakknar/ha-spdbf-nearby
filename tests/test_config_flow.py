@@ -17,6 +17,8 @@ from custom_components.spdbf_nearby.const import (
     CONF_SERVER_URL,
     CONF_SOURCES,
     CONF_TRACKED_ENTITY,
+    DEFAULT_DEPARTURES,
+    DEFAULT_MERGE_DUPLICATES,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
@@ -135,3 +137,24 @@ async def test_coordinator_without_map_settings(hass) -> None:
         )
         entry.add_to_hass(hass)
         assert SpdbfCoordinator(hass, entry, None).update_interval == interval
+
+
+async def test_new_entry_stores_the_hidden_map_settings(hass, aioclient_mock) -> None:
+    """Set up with map stops off, the entry still stores the map settings (defaults), so 0.11.x can load it after a rollback."""
+    aioclient_mock.post(f"{SERVER}/_geolocation", json={"candidates": []})
+    form = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(
+        form["flow_id"],
+        {
+            CONF_SERVER_URL: SERVER,
+            CONF_TRACKED_ENTITY: "person.me",
+            CONF_SOURCES: ["DB"],
+            CONF_MAP_STOPS: False,
+            CONF_DEPARTURES: 2,
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    data = result["data"]
+    assert data[CONF_DEPARTURES] == DEFAULT_DEPARTURES
+    assert data[CONF_SCAN_INTERVAL] == DEFAULT_SCAN_INTERVAL
+    assert data[CONF_MERGE_DUPLICATES] is DEFAULT_MERGE_DUPLICATES

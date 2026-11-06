@@ -47,12 +47,12 @@ Status:
 
 `ha-spdbf-nearby` (`custom_components/spdbf_nearby/`) shows public transport stops near a person on the Home Assistant map, from the owner's DBF (db-fakedisplay) server. Its dependencies are Home Assistant core (Python and frontend) and DBF's HTTP API.
 
-- **There are no automated tests.** Check at least this, in a venv with the Python version the new Home Assistant requires (`uv venv -p 3.x "$RUNNER_TEMP/venv"`, `uv pip install homeassistant==<new>`):
+- **Tests:** `tests/` runs in CI (checks.yml) on core's `pytest-homeassistant`; run it against the new version too. Also check at least this, in a venv with the Python version the new Home Assistant requires (`uv venv -p 3.x "$RUNNER_TEMP/venv"`, `uv pip install homeassistant==<new>`):
   - `python -m py_compile` on every module;
   - importing every module as `custom_components.spdbf_nearby.<module>` from the repository root;
   - that every `homeassistant.*` name it imports still exists.
 
-  If a fix is non-trivial, add a small pytest with `pytest-homeassistant-custom-component` that covers it, the way CLAUDE.md suggests (a fake DBF server, as in ha-audiocpp).
+  If a fix is non-trivial, add a small pytest with core's `pytest-homeassistant` (the version of the minimum Home Assistant; see CLAUDE.md "Testing" and checks.yml) that covers it, the way CLAUDE.md suggests (a fake DBF server, as in ha-audiocpp).
 - **Python side:** `geo_location` entities, `DataUpdateCoordinator`, state-change tracking, config and options flows, Repairs issues, `_unrecorded_attributes`, static paths and `add_extra_js_url` in the `http` and `frontend` integrations, and WebSocket commands (`websocket_api.websocket_command`, `async_response`, `async_register_command`, `ActiveConnection.send_result`/`send_error`, `ConfigEntryState`, `entry.reason`).
 - **Frontend side:** both scripts in `www/` depend on Home Assistant frontend behaviour. CLAUDE.md "How it works" and "Findings" list it.
   - **`dbf-core.js`** (the frontend core, `window.dbfCore`):

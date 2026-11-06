@@ -31,7 +31,7 @@ Live public transport in Home Assistant, from your own [DBF](https://github.com/
 
 ## Requirements
 
-- Home Assistant 2026.10.0 or newer.
+- Home Assistant 2026.11.0 or newer.
 - A DBF server that Home Assistant can reach.
 - **For BVG and other HAFAS stops on the map, and for the stop search:** the patched image [`ghcr.io/drakknar/db-fakedisplay`](https://github.com/Drakknar/db-fakedisplay-patched). Upstream DBF doesn't send coordinates for HAFAS stops and can't search stops by name as JSON. With an unpatched server, only DB stops appear on the map, Home Assistant shows a Repairs notice explaining why, and the search card says it needs the patched image.
 - **For your location:** a person or device tracker with GPS, such as the Home Assistant companion app.

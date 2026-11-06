@@ -64,7 +64,11 @@ _PROBE = {"lat": "52.5251", "lon": "13.3694"}
 
 # Settings of the map stops only, shown while map stops are on. A hidden field
 # is left out of the submitted data (Home Assistant 2026.11).
-_MAP_ONLY = (CONF_DEPARTURES, CONF_MERGE_DUPLICATES, CONF_SCAN_INTERVAL)
+_MAP_DEFAULTS = {
+    CONF_DEPARTURES: DEFAULT_DEPARTURES,
+    CONF_MERGE_DUPLICATES: DEFAULT_MERGE_DUPLICATES,
+    CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
+}
 _MAP_ON = {"field": CONF_MAP_STOPS, "value": True}
 
 
@@ -171,9 +175,20 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> probatio.Schema:
     )
 
 
-def _with_public_url(user_input: dict[str, Any]) -> dict[str, Any]:
-    """Store the public URL also when cleared: empty means the server URL (an omitted key would let setup's value show through the options)."""
+def _to_store(
+    user_input: dict[str, Any], saved: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Return the settings to save, always complete.
+
+    Hidden map settings keep their saved values (else the defaults), so turning
+    map stops back on brings them back, and 0.11.x, which reads them without
+    defaults, still loads the entry after a rollback. The public URL is stored
+    also when cleared: empty means the server URL (an omitted key would let
+    setup's value show through the options).
+    """
+    saved = saved or {}
     return {
+        **{key: saved.get(key, default) for key, default in _MAP_DEFAULTS.items()},
         **user_input,
         CONF_PUBLIC_URL: str(user_input.get(CONF_PUBLIC_URL) or "").strip(),
     }
@@ -219,7 +234,7 @@ class SpdbfConfigFlow(ConfigFlow, domain=DOMAIN):
                 state = self.hass.states.get(user_input[CONF_TRACKED_ENTITY])
                 who = state.name if state else user_input[CONF_TRACKED_ENTITY]
                 return self.async_create_entry(
-                    title=f"Stops near {who}", data=_with_public_url(user_input)
+                    title=f"Stops near {who}", data=_to_store(user_input)
                 )
         return self.async_show_form(
             step_id="user",
@@ -251,12 +266,7 @@ class SpdbfOptionsFlow(OptionsFlow):
             if errors == {CONF_SERVER_URL: "cannot_connect"} and same_server:
                 errors = {}
             if not errors:
-                # Keep the map settings while they are hidden, so turning map
-                # stops back on brings them back.
-                kept = {k: saved[k] for k in _MAP_ONLY if k in saved}
-                return self.async_create_entry(
-                    data=_with_public_url({**kept, **user_input})
-                )
+                return self.async_create_entry(data=_to_store(user_input, saved))
         return self.async_show_form(
             step_id="init",
             data_schema=_schema(self.hass, {**saved, **(user_input or {})}),
