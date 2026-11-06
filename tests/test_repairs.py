@@ -30,6 +30,10 @@ def _entry(hass: HomeAssistant) -> MockConfigEntry:
     return entry
 
 
+def _unreachable_id(entry: MockConfigEntry) -> str:
+    return f"{ISSUE_SERVER_UNREACHABLE}_{entry.entry_id}"
+
+
 def _status(hass: HomeAssistant, entry_id: str) -> DbfStatus:
     # problem_after 0: the first failing round is a problem.
     return DbfStatus(hass, entry_id, SERVER, timedelta(0), True)
@@ -39,7 +43,7 @@ async def test_unreachable_notice_is_linked_to_the_entry(hass: HomeAssistant) ->
     """The notice carries its entry, and a working round ends it."""
     entry = _entry(hass)
     status = _status(hass, entry.entry_id)
-    issue_id = f"{ISSUE_SERVER_UNREACHABLE}_{entry.entry_id}"
+    issue_id = _unreachable_id(entry)
     registry = ir.async_get(hass)
 
     status.record({"DB": "timeout"})
@@ -56,7 +60,7 @@ async def test_notice_survives_unload_until_a_working_round(
 ) -> None:
     """Unloading (a reload) keeps the notice; the new status ends it once DBF works."""
     entry = _entry(hass)
-    issue_id = f"{ISSUE_SERVER_UNREACHABLE}_{entry.entry_id}"
+    issue_id = _unreachable_id(entry)
     registry = ir.async_get(hass)
 
     old = _status(hass, entry.entry_id)
@@ -76,7 +80,7 @@ async def test_notice_is_removed_with_the_entry(hass: HomeAssistant) -> None:
     """Home Assistant deletes the notice when the entry is removed."""
     entry = _entry(hass)
     _status(hass, entry.entry_id).record({"DB": "timeout"})
-    issue_id = f"{ISSUE_SERVER_UNREACHABLE}_{entry.entry_id}"
+    issue_id = _unreachable_id(entry)
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
 
     await hass.config_entries.async_remove(entry.entry_id)
@@ -106,11 +110,8 @@ async def test_missing_coordinates_notice_per_entry(
         json={"candidates": [{**bvg, "lat": 52.505, "lon": 13.319}]},
     )
     first, second = _entry(hass), _entry(hass)
-    clients = {
-        first.entry_id: DbfClient(hass, _config(unpatched), first.entry_id),
-        second.entry_id: DbfClient(hass, _config(patched), second.entry_id),
-    }
-    for client in clients.values():
+    for server, entry in ((unpatched, first), (patched, second)):
+        client = DbfClient(hass, _config(server), entry.entry_id)
         await client.async_setup()
         await client.fetch_candidates(POSITION)
     assert registry.async_get_issue(DOMAIN, ISSUE_MISSING_COORDINATES) is None

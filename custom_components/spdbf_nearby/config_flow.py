@@ -247,9 +247,8 @@ class SpdbfOptionsFlow(OptionsFlow):
             errors = await _validate(self.hass, user_input)
             # Your server may be down right now, which is when you'd want to
             # change the fallback. Only a new server URL must answer.
-            if errors == {CONF_SERVER_URL: "cannot_connect"} and user_input[
-                CONF_SERVER_URL
-            ] == saved.get(CONF_SERVER_URL):
+            same_server = user_input[CONF_SERVER_URL] == saved.get(CONF_SERVER_URL)
+            if errors == {CONF_SERVER_URL: "cannot_connect"} and same_server:
                 errors = {}
             if not errors:
                 # Keep the map settings while they are hidden, so turning map
