@@ -5,6 +5,7 @@ from typing import Any
 import aiohttp
 import probatio
 
+from homeassistant import data_entry_flow
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -60,6 +61,15 @@ from .const import (
 
 # Berlin Hbf, only used to check that the server answers.
 _PROBE = {"lat": "52.5251", "lon": "13.3694"}
+
+# Settings of the map stops only, shown while map stops are on. A hidden field
+# is left out of the submitted data (Home Assistant 2026.11).
+_MAP_DEFAULTS = {
+    CONF_DEPARTURES: DEFAULT_DEPARTURES,
+    CONF_MERGE_DUPLICATES: DEFAULT_MERGE_DUPLICATES,
+    CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
+}
+_MAP_ON = {"field": CONF_MAP_STOPS, "value": True}
 
 
 def _schema(hass: HomeAssistant, values: dict[str, Any]) -> probatio.Schema:
@@ -117,14 +127,17 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> probatio.Schema:
             ): NumberSelector(
                 NumberSelectorConfig(min=1, max=30, step=1, mode=NumberSelectorMode.BOX)
             ),
-            probatio.Required(
-                CONF_DEPARTURES, default=values.get(CONF_DEPARTURES, DEFAULT_DEPARTURES)
+            data_entry_flow.Required(
+                CONF_DEPARTURES,
+                default=values.get(CONF_DEPARTURES, DEFAULT_DEPARTURES),
+                visible=_MAP_ON,
             ): NumberSelector(
                 NumberSelectorConfig(min=0, max=10, step=1, mode=NumberSelectorMode.BOX)
             ),
-            probatio.Required(
+            data_entry_flow.Required(
                 CONF_MERGE_DUPLICATES,
                 default=values.get(CONF_MERGE_DUPLICATES, DEFAULT_MERGE_DUPLICATES),
+                visible=_MAP_ON,
             ): BooleanSelector(),
             probatio.Required(
                 CONF_MERGE_NETWORKS,
@@ -145,9 +158,10 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> probatio.Schema:
                     mode=NumberSelectorMode.BOX,
                 )
             ),
-            probatio.Required(
+            data_entry_flow.Required(
                 CONF_SCAN_INTERVAL,
                 default=values.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+                visible=_MAP_ON,
             ): NumberSelector(
                 NumberSelectorConfig(
                     min=30,
@@ -161,9 +175,20 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> probatio.Schema:
     )
 
 
-def _with_public_url(user_input: dict[str, Any]) -> dict[str, Any]:
-    """Store the public URL also when cleared: empty means the server URL (an omitted key would let setup's value show through the options)."""
+def _to_store(
+    user_input: dict[str, Any], saved: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Return the settings to save, always complete.
+
+    Hidden map settings keep their saved values (else the defaults), so turning
+    map stops back on brings them back, and 0.11.x, which reads them without
+    defaults, still loads the entry after a rollback. The public URL is stored
+    also when cleared: empty means the server URL (an omitted key would let
+    setup's value show through the options).
+    """
+    saved = saved or {}
     return {
+        **{key: saved.get(key, default) for key, default in _MAP_DEFAULTS.items()},
         **user_input,
         CONF_PUBLIC_URL: str(user_input.get(CONF_PUBLIC_URL) or "").strip(),
     }
@@ -209,7 +234,7 @@ class SpdbfConfigFlow(ConfigFlow, domain=DOMAIN):
                 state = self.hass.states.get(user_input[CONF_TRACKED_ENTITY])
                 who = state.name if state else user_input[CONF_TRACKED_ENTITY]
                 return self.async_create_entry(
-                    title=f"Stops near {who}", data=_with_public_url(user_input)
+                    title=f"Stops near {who}", data=_to_store(user_input)
                 )
         return self.async_show_form(
             step_id="user",
@@ -231,27 +256,19 @@ class SpdbfOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Manage the options."""
+        saved = {**self.config_entry.data, **self.config_entry.options}
         errors: dict[str, str] = {}
         if user_input is not None:
             errors = await _validate(self.hass, user_input)
-            current_server = {
-                **self.config_entry.data,
-                **self.config_entry.options,
-            }.get(CONF_SERVER_URL)
             # Your server may be down right now, which is when you'd want to
             # change the fallback. Only a new server URL must answer.
-            if (
-                errors == {CONF_SERVER_URL: "cannot_connect"}
-                and user_input[CONF_SERVER_URL] == current_server
-            ):
+            same_server = user_input[CONF_SERVER_URL] == saved.get(CONF_SERVER_URL)
+            if errors == {CONF_SERVER_URL: "cannot_connect"} and same_server:
                 errors = {}
             if not errors:
-                return self.async_create_entry(data=_with_public_url(user_input))
-        current = {
-            **self.config_entry.data,
-            **self.config_entry.options,
-            **(user_input or {}),
-        }
+                return self.async_create_entry(data=_to_store(user_input, saved))
         return self.async_show_form(
-            step_id="init", data_schema=_schema(self.hass, current), errors=errors
+            step_id="init",
+            data_schema=_schema(self.hass, {**saved, **(user_input or {})}),
+            errors=errors,
         )

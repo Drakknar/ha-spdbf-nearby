@@ -54,7 +54,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: SpdbfConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: SpdbfConfigEntry) -> None:
     """Set up spdbf Public Transport from a config entry."""
     service = TransportService(hass, {**entry.data, **entry.options}, entry.entry_id)
     coordinator = SpdbfCoordinator(hass, entry, service)
@@ -76,12 +76,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: SpdbfConfigEntry) -> boo
         await async_register_resource(hass)
     except Exception:
         _LOGGER.exception("Couldn't add the cards as a dashboard resource")
-    return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: SpdbfConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: SpdbfConfigEntry) -> None:
     """Unload a config entry."""
-    return await hass.config_entries.async_unload_platforms(
+    await hass.config_entries.async_unload_platforms_or_raise(
         entry, _platforms(entry.runtime_data)
     )
 
@@ -98,7 +97,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: SpdbfConfigEntry) -> No
         await async_unregister_resource(hass)
 
 
-async def async_migrate_entry(hass: HomeAssistant, entry: SpdbfConfigEntry) -> bool:
+async def async_migrate_entry(hass: HomeAssistant, entry: SpdbfConfigEntry) -> None:
     """Move entries from the public DBF fallback to Transitous (0.9.0).
 
     The old fallback (a public DBF instance, off by default) is gone; its
@@ -113,7 +112,6 @@ async def async_migrate_entry(hass: HomeAssistant, entry: SpdbfConfigEntry) -> b
         hass.config_entries.async_update_entry(
             entry, data=data, options=options, minor_version=2
         )
-    return True
 
 
 async def _async_reload(hass: HomeAssistant, entry: SpdbfConfigEntry) -> None:

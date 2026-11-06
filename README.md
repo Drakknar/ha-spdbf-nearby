@@ -31,7 +31,7 @@ Live public transport in Home Assistant, from your own [DBF](https://github.com/
 
 ## Requirements
 
-- Home Assistant 2026.10.0 or newer.
+- Home Assistant 2026.11.0 or newer.
 - A DBF server that Home Assistant can reach.
 - **For BVG and other HAFAS stops on the map, and for the stop search:** the patched image [`ghcr.io/drakknar/db-fakedisplay`](https://github.com/Drakknar/db-fakedisplay-patched). Upstream DBF doesn't send coordinates for HAFAS stops and can't search stops by name as JSON. With an unpatched server, only DB stops appear on the map, Home Assistant shows a Repairs notice explaining why, and the search card says it needs the patched image.
 - **For your location:** a person or device tracker with GPS, such as the Home Assistant companion app.
@@ -65,13 +65,13 @@ After installing or updating, reload the Home Assistant page or companion app on
 | Sources | DB, BVG | `DB` is DBF's built-in DB station list. Everything else is a HAFAS network name. |
 | Search radius | 1 km | Only stops within this distance are shown. |
 | Maximum number of stops | 12 | The nearest stops are kept. |
-| Departures per stop | 5 | Departures kept on each map stop (for `next_departure` and Markdown cards). The dialog always loads the full board. Set to 0 to show stops only. |
-| Merge duplicate stops | on | Show one stop when nearby stops have exactly the same departures. Needs departures turned on. |
+| Departures per stop | 5 | Departures kept on each map stop (for `next_departure` and Markdown cards). The dialog always loads the full board. Set to 0 to show stops only. Only shown while "Show nearby stops on the map" is on. |
+| Merge duplicate stops | on | Show one stop when nearby stops have exactly the same departures. Needs departures turned on. Only shown while "Show nearby stops on the map" is on. |
 | Show nearby stops on the map | on | Off: no stop entities and no polling. The search card, departures and trips still work; "near you" uses the device's location or the followed person's. |
 | Merge DB and BVG stations | on | Show a DB station and the BVG S-/U-Bahn stop of the same name, at most 300 m apart, as one stop. Bus and tram stops stay separate. |
 | Use Transitous while DBF can't deliver | on | See [When DBF can't deliver](#when-dbf-cant-deliver). |
 | Report DBF as down after | 10 min | How long DBF must fail before the problem sensor, a Repairs notice and the cards' warning appear. |
-| Departure refresh interval | 60 s | How often departures are updated. |
+| Departure refresh interval | 60 s | How often departures are updated. Only shown while "Show nearby stops on the map" is on. |
 
 Stops are searched again after you move more than 100 m, or every 15 minutes. Location fixes less accurate than 250 m are ignored.
 
@@ -207,7 +207,7 @@ The resource is only added in storage mode (the default; in YAML mode resources 
 
 ## Development
 
-There are no automated tests in the repository; changes are checked with a scratch pytest run against Home Assistant's test harness. How the integration works, how changes have been checked, and the open items are in [`custom_components/spdbf_nearby/CLAUDE.md`](custom_components/spdbf_nearby/CLAUDE.md).
+The tests in `tests/` run in CI on Home Assistant's `pytest-homeassistant` harness at the minimum version from `hacs.json`. How the integration works, how changes have been checked, and the open items are in [`custom_components/spdbf_nearby/CLAUDE.md`](custom_components/spdbf_nearby/CLAUDE.md).
 
 ## License
 

@@ -1,7 +1,7 @@
 name: Checks
 
 # Runs on every pull request (Dependabot's included) and on pushes to main:
-# the pytest suite in tests/ on Home Assistant's test harness, and actionlint
+# the pytest suite in tests/ on core's test harness (pytest-homeassistant), and actionlint
 # on the workflows themselves.
 # Its jobs are required on main. Pull requests opened by the Compatibility review
 # use GITHUB_TOKEN, which doesn't trigger this workflow: close and reopen one by
@@ -19,10 +19,6 @@ concurrency:
   group: checks-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # 0.13.373 = Home Assistant 2026.10.2. Raise it together with hacs.json.
-  HARNESS: pytest-homeassistant-custom-component==0.13.373
-
 jobs:
   pytest:
     runs-on: ubuntu-latest
@@ -31,12 +27,16 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
       - name: Install the test harness
-        # The integration depends on frontend and, through Assist, conversation;
-        # see the Testing section of custom_components/spdbf_nearby/CLAUDE.md.
+        # The minimum Home Assistant (read from hacs.json, so CI follows a raise
+        # there) with core's harness of the same version. The integration
+        # depends on frontend and, through Assist, conversation; see the Testing
+        # section of custom_components/spdbf_nearby/CLAUDE.md.
         run: |
+          ha=$(jq -er .homeassistant hacs.json)
           uv venv -p 3.14 "$RUNNER_TEMP/venv"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
-          VIRTUAL_ENV=$RUNNER_TEMP/venv uv pip install "$HARNESS" \
+          VIRTUAL_ENV=$RUNNER_TEMP/venv uv pip install "homeassistant==$ha" \
+            "pytest-homeassistant==$ha" \
             home-assistant-frontend hassil home-assistant-intents gazetteer-matcher
 
       - name: pytest

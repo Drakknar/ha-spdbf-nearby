@@ -32,8 +32,10 @@ from .const import (
     CONF_RADIUS,
     CONF_SCAN_INTERVAL,
     CONF_TRACKED_ENTITY,
+    DEFAULT_DEPARTURES,
     DEFAULT_MAP_STOPS,
     DEFAULT_MERGE_DUPLICATES,
+    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     FALLBACK_STOPS,
     MAX_GPS_ACCURACY_METERS,
@@ -88,7 +90,11 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
             name=DOMAIN,
             # Without map stops there is nothing to keep up to date.
             update_interval=(
-                timedelta(seconds=int(self.config[CONF_SCAN_INTERVAL]))
+                timedelta(
+                    seconds=int(
+                        self.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+                    )
+                )
                 if self.map_stops
                 else None
             ),
@@ -97,7 +103,7 @@ class SpdbfCoordinator(DataUpdateCoordinator[dict[str, Stop]]):
         self.tracked = self.config[CONF_TRACKED_ENTITY]
         self._radius_m = float(self.config[CONF_RADIUS]) * 1000
         self._max_stops = int(self.config[CONF_MAX_STOPS])
-        self._departures = int(self.config[CONF_DEPARTURES])
+        self._departures = int(self.config.get(CONF_DEPARTURES, DEFAULT_DEPARTURES))
         self._merge = bool(
             self.config.get(CONF_MERGE_DUPLICATES, DEFAULT_MERGE_DUPLICATES)
         )
