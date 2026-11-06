@@ -55,7 +55,7 @@ class TransportService:
         self, hass: HomeAssistant, config: dict[str, Any], entry_id: str
     ) -> None:
         """Initialize the service of one config entry."""
-        self.dbf = DbfClient(hass, config)
+        self.dbf = DbfClient(hass, config, entry_id)
         fallback = bool(config.get(CONF_FALLBACK, DEFAULT_FALLBACK))
         self.transitous = TransitousClient(hass) if fallback else None
         self.last_known = LastKnown(hass, entry_id)
@@ -78,7 +78,7 @@ class TransportService:
 
     async def async_unload(self) -> None:
         """Stop reporting status and save the last known answers."""
-        self.status.async_clear()
+        self.status.async_close()
         await self.last_known.async_flush()
 
     # --- Passed through to DBF -------------------------------------------

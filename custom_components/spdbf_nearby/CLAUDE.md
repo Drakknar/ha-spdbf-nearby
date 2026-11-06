@@ -17,7 +17,7 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
 
 ```
 <repo root>/
-  hacs.json, README.md              HACS metadata (min HA 2026.10.0) and user docs
+  hacs.json, README.md              HACS metadata (min HA 2026.11.0) and user docs
   custom_components/spdbf_nearby/   <- this folder
     __init__.py         Serves www/ as static files, injects spdbf-loader.js on every page
                         (add_extra_js_url), registers the WebSocket commands, creates the
@@ -68,7 +68,7 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
   - Moving 100 m or more, or a stop list older than 15 minutes, triggers a new stop lookup.
   - Smaller moves only refresh the distances, without asking DBF.
 - **Stop lookup:** `POST <server>/_geolocation` with `lat`, `lon` and `hafas=<service>`. It is called once per HAFAS source. Each call also returns the DB (IRIS) stations, flagged with `hafas == 0`, so DB needs no call of its own.
-  - Candidates without `lat`/`lon` are dropped, and a Repairs issue (`missing_coordinates`) explains that the server needs the patched image.
+  - Candidates without `lat`/`lon` are dropped, and a Repairs issue (`missing_coordinates_<entry_id>` since 0.12.0, linked to the entry; the old shared `missing_coordinates` is deleted at setup) explains that the server needs the patched image.
   - Stops are filtered by radius, sorted by distance and capped at the configured maximum.
   - If a lookup fails but stops are already known, the old list is kept.
 - **Departures:** `GET <server>/<eva>?mode=json&limit=<3 × departures>[&hafas=<service>]`, refreshed every scan interval (60 s by default). At most 4 requests run in parallel, because DBF's default container has only a few workers.
@@ -110,7 +110,7 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
   - **Why not dbf.finalrewind.org any more (owner, 2026-10-22):** same upstreams as yours (it fails together with them, which is the outage actually seen), no name search, no BVG trip ids, 10 requests/min. Entries from 0.8 are migrated: `fallback_url` dropped, `fallback` set on (the old on/off meant something else).
 - **Status checks (since 0.9.0, `status.py`):** every `STATUS_INTERVAL` (60 s) `async_check` fetches one live board per network: `STATUS_STATIONS` (Berlin Hbf: DB 8011160, BVG 900003201) else the nearest map stop of that network. The URL carries `spdbf_check=<epoch>`, so a cache in front of DBF (the owner's SWAG `spdbf` site serves stale boards up to 15 min) can't answer. 5xx, timeouts and gateway errors fail; HTTP 300 counts as working.
   - **Per network:** a network failing for `problem_after` (option, default 10 min) makes DBF "down for real", even if the other works. One working check of that network ends it.
-  - **Shown as:** the *DBF problem* sensor (since 0.11.1 native naming: `has_entity_name`, translation key `dbf_problem`, on the service device "spdbf Public Transport", so new installs get `binary_sensor.spdbf_public_transport_dbf_problem`; older installs keep their entity id; unique id `<entry>_dbf_problem`; attributes `failing_since`, `failing` {network: since, reason}, `last_check`, `fallback`, `spdbf_status: true` for the frontend to find it), the Repairs issue `server_unreachable_<entry_id>` (now "DBF isn't delivering departures"), and the cards' and dialog's warning line. All clear on recovery; the issue is also removed on unload.
+  - **Shown as:** the *DBF problem* sensor (since 0.11.1 native naming: `has_entity_name`, translation key `dbf_problem`, on the service device "spdbf Public Transport", so new installs get `binary_sensor.spdbf_public_transport_dbf_problem`; older installs keep their entity id; unique id `<entry>_dbf_problem`; attributes `failing_since`, `failing` {network: since, reason}, `last_check`, `fallback`, `spdbf_status: true` for the frontend to find it), the Repairs issue `server_unreachable_<entry_id>` (now "DBF isn't delivering departures"), and the cards' and dialog's warning line. All clear on recovery. Since 0.12.0 (HA 2026.11) the issue is linked to its config entry (`config_entry_id`): HA hides it while the entry is disabled and deletes it with the entry (and at startup for entries that no longer exist). Unload no longer deletes it; after a reload the first round with no failing network does. `DbfStatus.async_close` still drops late rounds, because an issue can't be linked to a removed entry (HA raises).
 - **WebSocket commands (`websocket_api.py`):**
   - **`search`** `{query}` and **`nearby`** `{latitude?, longitude?}` return `stops` with name, eva, network, coordinates, `distance_km`, `entity_picture`, `url`, `merged_stops` and `networks`.
   - **`nearby` without a position,** or within 100 m of the tracked entity, returns the coordinator's current (merged) stops. Elsewhere it does a fresh, unmerged lookup.
@@ -211,7 +211,7 @@ This folder is self-contained, like `ha-audiocpp`: code and these notes. Only `h
 
 ## Testing
 
-**In the repository (since 0.11.0):** `tests/` holds unit tests of the Assist answers (`assist.py`) on a fake coordinator, ride times (`dbf._ride_on`), the options flow's public URL, and the Transitous nearest-stops fallback; a few use the harness's `hass` / `aioclient_mock` fixtures, none needs a DBF server or the network. Run from the repository root with `pytest tests` in a venv with `pytest-homeassistant-custom-component` (0.13.373 = HA 2026.10.2); `tests/pytest.ini` sets `asyncio_mode = auto` and the import path. The integration tests below are still scratch tests.
+**In the repository (since 0.11.0):** `tests/` holds unit tests of the Assist answers (`assist.py`) on a fake coordinator, ride times (`dbf._ride_on`), the options flow's public URL and hidden map fields, the Repairs notices (since 0.12.0), and the Transitous nearest-stops fallback; a few use the harness's `hass` / `aioclient_mock` fixtures, none needs a DBF server or the network. Run from the repository root with `pytest tests` in a venv with `homeassistant` and core's `pytest-homeassistant` of the minimum version (since 0.12.0; 2026.11.0, installed from core's git tag until it's on PyPI, see checks.yml); `tests/pytest.ini` sets `asyncio_mode = auto`, `-p no:respx` and the import path. Don't install it next to the old `pytest-homeassistant-custom-component`. The integration tests below are still scratch tests.
 
 What has been done for changes so far:
 
@@ -255,6 +255,7 @@ What has been done for changes so far:
 
 ## Open items
 
+- **0.12.0 (HA 2026.11 minimum), not yet installed:** Repairs notices linked to the entry, map-only options (`departures`, `merge_duplicates`, `scan_interval`) shown only while map stops are on (`data_entry_flow.Required(visible=...)`; a hidden field is dropped from the submitted data, so the options flow keeps the saved values and the coordinator falls back to the defaults), config entry methods return None, tests on core's `pytest-homeassistant`. `problem_after` stays visible: the status checks run with or without map stops. Check in HA: the options form hides and shows the three fields as map stops is toggled.
 - **0.9.0 live outage test (2026-10-22 13:48–14:12, owner's SWAG `spdbf.conf` hop pointed at a closed port):** status checks failed at once; the 3 nearest map stops switched to Transitous, the other 9 to last known; a card-style `board` request got 80 Transitous departures; an HA restart mid-outage loaded the entry fine (empty map, checks and fallbacks running: the review's fix #1); the problem sensor and Repairs notice came 10 min after the (restarted) failure; recovery about 1 min after the hop was restored (sensor off, notice gone, 12 map stops on DBF). Two findings, fixed in 0.9.1:
   - **db_infoscreen never goes unavailable on fetch failures:** it keeps its last board and recalculates it every 30 s (`last_updated` follows the recalculation; no fetch time is exposed). The cards' "sensor unavailable" trigger therefore never fired; they now also fall back while the problem sensor is on (and don't learn destinations then).
   - **Paused map stops ran out of last known rows** (5 per stop) and showed "paused"; they now ask Transitous at most every 5 min.

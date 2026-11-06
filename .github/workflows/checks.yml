@@ -1,7 +1,7 @@
 name: Checks
 
 # Runs on every pull request (Dependabot's included) and on pushes to main:
-# the pytest suite in tests/ on Home Assistant's test harness, and actionlint
+# the pytest suite in tests/ on core's test harness (pytest-homeassistant), and actionlint
 # on the workflows themselves.
 # Its jobs are required on main. Pull requests opened by the Compatibility review
 # use GITHUB_TOKEN, which doesn't trigger this workflow: close and reopen one by
@@ -20,8 +20,12 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # 0.13.373 = Home Assistant 2026.10.2. Raise it together with hacs.json.
-  HARNESS: pytest-homeassistant-custom-component==0.13.373
+  # The minimum (hacs.json) with core's harness, same version as homeassistant.
+  # Raise both together with hacs.json.
+  # TODO: install pytest-homeassistant==2026.11.0 from PyPI once it's published
+  # (404 on 2026-11-06; the PyPI 0.1.x is an unrelated project), like ha-audiocpp.
+  HA: homeassistant==2026.11.0
+  HARNESS: pytest-homeassistant@git+https://github.com/home-assistant/core@2026.11.0#subdirectory=packages/pytest-homeassistant
 
 jobs:
   pytest:
@@ -36,7 +40,7 @@ jobs:
         run: |
           uv venv -p 3.14 "$RUNNER_TEMP/venv"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
-          VIRTUAL_ENV=$RUNNER_TEMP/venv uv pip install "$HARNESS" \
+          VIRTUAL_ENV=$RUNNER_TEMP/venv uv pip install "$HA" "$HARNESS" \
             home-assistant-frontend hassil home-assistant-intents gazetteer-matcher
 
       - name: pytest

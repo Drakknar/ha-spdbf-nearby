@@ -5,6 +5,7 @@ from typing import Any
 import aiohttp
 import probatio
 
+from homeassistant import data_entry_flow
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -60,6 +61,11 @@ from .const import (
 
 # Berlin Hbf, only used to check that the server answers.
 _PROBE = {"lat": "52.5251", "lon": "13.3694"}
+
+# Settings of the map stops only, shown while map stops are on. A hidden field
+# is left out of the submitted data (Home Assistant 2026.11).
+_MAP_ONLY = (CONF_DEPARTURES, CONF_MERGE_DUPLICATES, CONF_SCAN_INTERVAL)
+_MAP_ON = {"field": CONF_MAP_STOPS, "value": True}
 
 
 def _schema(hass: HomeAssistant, values: dict[str, Any]) -> probatio.Schema:
@@ -117,14 +123,17 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> probatio.Schema:
             ): NumberSelector(
                 NumberSelectorConfig(min=1, max=30, step=1, mode=NumberSelectorMode.BOX)
             ),
-            probatio.Required(
-                CONF_DEPARTURES, default=values.get(CONF_DEPARTURES, DEFAULT_DEPARTURES)
+            data_entry_flow.Required(
+                CONF_DEPARTURES,
+                default=values.get(CONF_DEPARTURES, DEFAULT_DEPARTURES),
+                visible=_MAP_ON,
             ): NumberSelector(
                 NumberSelectorConfig(min=0, max=10, step=1, mode=NumberSelectorMode.BOX)
             ),
-            probatio.Required(
+            data_entry_flow.Required(
                 CONF_MERGE_DUPLICATES,
                 default=values.get(CONF_MERGE_DUPLICATES, DEFAULT_MERGE_DUPLICATES),
+                visible=_MAP_ON,
             ): BooleanSelector(),
             probatio.Required(
                 CONF_MERGE_NETWORKS,
@@ -145,9 +154,10 @@ def _schema(hass: HomeAssistant, values: dict[str, Any]) -> probatio.Schema:
                     mode=NumberSelectorMode.BOX,
                 )
             ),
-            probatio.Required(
+            data_entry_flow.Required(
                 CONF_SCAN_INTERVAL,
                 default=values.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+                visible=_MAP_ON,
             ): NumberSelector(
                 NumberSelectorConfig(
                     min=30,
@@ -231,27 +241,25 @@ class SpdbfOptionsFlow(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Manage the options."""
+        saved = {**self.config_entry.data, **self.config_entry.options}
         errors: dict[str, str] = {}
         if user_input is not None:
             errors = await _validate(self.hass, user_input)
-            current_server = {
-                **self.config_entry.data,
-                **self.config_entry.options,
-            }.get(CONF_SERVER_URL)
             # Your server may be down right now, which is when you'd want to
             # change the fallback. Only a new server URL must answer.
-            if (
-                errors == {CONF_SERVER_URL: "cannot_connect"}
-                and user_input[CONF_SERVER_URL] == current_server
-            ):
+            if errors == {CONF_SERVER_URL: "cannot_connect"} and user_input[
+                CONF_SERVER_URL
+            ] == saved.get(CONF_SERVER_URL):
                 errors = {}
             if not errors:
-                return self.async_create_entry(data=_with_public_url(user_input))
-        current = {
-            **self.config_entry.data,
-            **self.config_entry.options,
-            **(user_input or {}),
-        }
+                # Keep the map settings while they are hidden, so turning map
+                # stops back on brings them back.
+                kept = {k: saved[k] for k in _MAP_ONLY if k in saved}
+                return self.async_create_entry(
+                    data=_with_public_url({**kept, **user_input})
+                )
         return self.async_show_form(
-            step_id="init", data_schema=_schema(self.hass, current), errors=errors
+            step_id="init",
+            data_schema=_schema(self.hass, {**saved, **(user_input or {})}),
+            errors=errors,
         )

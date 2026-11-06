@@ -74,9 +74,13 @@ class ServerUnreachable(DbfError):
 class DbfClient:
     """Your DBF server, with fast failure while it is down."""
 
-    def __init__(self, hass: HomeAssistant, config: dict[str, Any]) -> None:
+    def __init__(
+        self, hass: HomeAssistant, config: dict[str, Any], entry_id: str
+    ) -> None:
         """Initialize the client from the entry's settings."""
         self.hass = hass
+        self._entry_id = entry_id
+        self._coordinate_issue_id = f"{ISSUE_MISSING_COORDINATES}_{entry_id}"
         self._session = async_get_clientsession(hass)
         self.server = config[CONF_SERVER_URL].rstrip("/")
         # Links default to the server URL when no public URL is set.
@@ -98,6 +102,8 @@ class DbfClient:
     async def async_setup(self) -> None:
         """Load the IRIS time zone without blocking the event loop."""
         self._iris_tz = await dt_util.async_get_time_zone(IRIS_TIME_ZONE)
+        # Before 0.12.0 the notice was one for all entries, not linked to any.
+        ir.async_delete_issue(self.hass, DOMAIN, ISSUE_MISSING_COORDINATES)
 
     @property
     def down(self) -> bool:
@@ -271,6 +277,9 @@ class DbfClient:
     def _set_coordinate_issue(self, missing: bool) -> None:
         if missing == self._coordinate_issue:
             return
+        # A late answer after the entry was removed: nothing to link a notice to.
+        if self.hass.config_entries.async_get_entry(self._entry_id) is None:
+            return
         self._coordinate_issue = missing
         if missing:
             _LOGGER.warning(
@@ -281,14 +290,15 @@ class DbfClient:
             ir.async_create_issue(
                 self.hass,
                 DOMAIN,
-                ISSUE_MISSING_COORDINATES,
+                self._coordinate_issue_id,
+                config_entry_id=self._entry_id,
                 is_fixable=False,
                 severity=ir.IssueSeverity.WARNING,
                 translation_key=ISSUE_MISSING_COORDINATES,
                 translation_placeholders={"server": self.server},
             )
         else:
-            ir.async_delete_issue(self.hass, DOMAIN, ISSUE_MISSING_COORDINATES)
+            ir.async_delete_issue(self.hass, DOMAIN, self._coordinate_issue_id)
 
     # --- Departures -----------------------------------------------------
 

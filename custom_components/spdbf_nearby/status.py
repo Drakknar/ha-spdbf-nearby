@@ -33,6 +33,7 @@ class DbfStatus:
     ) -> None:
         """Initialize the status of one config entry."""
         self.hass = hass
+        self._entry_id = entry_id
         self._issue_id = f"{ISSUE_SERVER_UNREACHABLE}_{entry_id}"
         self._server = server
         self._problem_after = problem_after
@@ -71,8 +72,8 @@ class DbfStatus:
     @callback
     def record(self, checks: dict[str, str | None]) -> None:
         """Take one round of checks (network -> error, or None if it worked)."""
-        # A check still running when the entry unloaded must not bring the
-        # Repairs notice back.
+        # A check still running when the entry unloaded is dropped: after a
+        # removal its entry is gone, and an issue can't be linked to it.
         if not checks or self._closed:
             return
         now = dt_util.utcnow()
@@ -95,8 +96,10 @@ class DbfStatus:
                 self.reason,
             )
             self._create_issue()
-        elif self.problem and not problem:
-            _LOGGER.info("DBF at %s delivers departures again", self._server)
+        elif since is None:
+            if self.problem:
+                _LOGGER.info("DBF at %s delivers departures again", self._server)
+            # Also ends a notice kept from before a reload.
             ir.async_delete_issue(self.hass, DOMAIN, self._issue_id)
         self.problem = problem
         for listener in list(self._listeners):
@@ -109,6 +112,7 @@ class DbfStatus:
             self.hass,
             DOMAIN,
             self._issue_id,
+            config_entry_id=self._entry_id,
             is_fixable=False,
             severity=ir.IssueSeverity.WARNING,
             translation_key=ISSUE_SERVER_UNREACHABLE,
@@ -128,10 +132,14 @@ class DbfStatus:
         )
 
     @callback
-    def async_clear(self) -> None:
-        """Remove the Repairs notice and stop taking checks (the entry unloads)."""
+    def async_close(self) -> None:
+        """Stop taking checks (the entry unloads).
+
+        The Repairs notice belongs to the config entry: Home Assistant hides it
+        while the entry is disabled and deletes it with the entry. After a
+        reload, the first round without failures ends it.
+        """
         self._closed = True
-        ir.async_delete_issue(self.hass, DOMAIN, self._issue_id)
 
     def attributes(self) -> dict[str, Any]:
         """Return the details shown on the problem sensor."""
