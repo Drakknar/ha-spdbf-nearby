@@ -19,14 +19,6 @@ concurrency:
   group: checks-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # The minimum (hacs.json) with core's harness, same version as homeassistant.
-  # Raise both together with hacs.json.
-  # TODO: install pytest-homeassistant==2026.11.0 from PyPI once it's published
-  # (404 on 2026-11-06; the PyPI 0.1.x is an unrelated project), like ha-audiocpp.
-  HA: homeassistant==2026.11.0
-  HARNESS: pytest-homeassistant@git+https://github.com/home-assistant/core@2026.11.0#subdirectory=packages/pytest-homeassistant
-
 jobs:
   pytest:
     runs-on: ubuntu-latest
@@ -35,12 +27,16 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
       - name: Install the test harness
-        # The integration depends on frontend and, through Assist, conversation;
-        # see the Testing section of custom_components/spdbf_nearby/CLAUDE.md.
+        # The minimum Home Assistant (read from hacs.json, so CI follows a raise
+        # there) with core's harness of the same version. The integration
+        # depends on frontend and, through Assist, conversation; see the Testing
+        # section of custom_components/spdbf_nearby/CLAUDE.md.
         run: |
+          ha=$(jq -r .homeassistant hacs.json)
           uv venv -p 3.14 "$RUNNER_TEMP/venv"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
-          VIRTUAL_ENV=$RUNNER_TEMP/venv uv pip install "$HA" "$HARNESS" \
+          VIRTUAL_ENV=$RUNNER_TEMP/venv uv pip install "homeassistant==$ha" \
+            "pytest-homeassistant==$ha" \
             home-assistant-frontend hassil home-assistant-intents gazetteer-matcher
 
       - name: pytest
