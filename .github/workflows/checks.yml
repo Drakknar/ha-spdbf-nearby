@@ -32,7 +32,7 @@ jobs:
         # depends on frontend and, through Assist, conversation; see the Testing
         # section of custom_components/spdbf_nearby/CLAUDE.md.
         run: |
-          ha=$(jq -r .homeassistant hacs.json)
+          ha=$(jq -er .homeassistant hacs.json)
           uv venv -p 3.14 "$RUNNER_TEMP/venv"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
           VIRTUAL_ENV=$RUNNER_TEMP/venv uv pip install "homeassistant==$ha" \

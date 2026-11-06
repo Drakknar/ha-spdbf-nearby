@@ -162,3 +162,41 @@ async def test_new_entry_stores_the_hidden_map_settings(hass, aioclient_mock) ->
     assert data[CONF_DEPARTURES] == DEFAULT_DEPARTURES
     assert data[CONF_SCAN_INTERVAL] == DEFAULT_SCAN_INTERVAL
     assert data[CONF_MERGE_DUPLICATES] is DEFAULT_MERGE_DUPLICATES
+
+
+async def test_map_settings_come_back_with_map_stops(hass, aioclient_mock) -> None:
+    """Turning map stops back on shows the map fields again: submitted values replace the saved ones."""
+    aioclient_mock.post(f"{SERVER}/_geolocation", json={"candidates": []})
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=1,
+        minor_version=2,
+        data={
+            CONF_SERVER_URL: SERVER,
+            CONF_TRACKED_ENTITY: "person.me",
+            CONF_SOURCES: ["DB", "BVG"],
+            CONF_MAP_STOPS: False,
+            CONF_DEPARTURES: 7,
+            CONF_SCAN_INTERVAL: 90,
+            CONF_MERGE_DUPLICATES: False,
+        },
+    )
+    entry.add_to_hass(hass)
+    form = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {
+            CONF_SERVER_URL: SERVER,
+            CONF_TRACKED_ENTITY: "person.me",
+            CONF_SOURCES: ["DB", "BVG"],
+            CONF_MAP_STOPS: True,
+            CONF_DEPARTURES: 3,
+            CONF_SCAN_INTERVAL: 120,
+            CONF_MERGE_DUPLICATES: True,
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_MAP_STOPS] is True
+    assert result["data"][CONF_DEPARTURES] == 3
+    assert result["data"][CONF_SCAN_INTERVAL] == 120
+    assert result["data"][CONF_MERGE_DUPLICATES] is True
