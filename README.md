@@ -1,5 +1,7 @@
 # spdbf Public Transport for Home Assistant
 
+<img src="assets/icon.svg" alt="" width="96" align="right">
+
 Live public transport in Home Assistant, from your own [DBF](https://github.com/derf/db-fakedisplay) (db-fakedisplay) server: stops near you on the map, a stop search, cards for the connections you use with ride and walk times, and trip details. DB and BVG by default.
 
 **Your connections**
